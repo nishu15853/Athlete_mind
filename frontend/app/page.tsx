@@ -240,6 +240,93 @@ interface FloatingText {
   maxLife: number;
 }
 
+export interface RecoverySession {
+  id: string;
+  date: string;
+  avgDepthAngle: number;
+  maxHoldDuration: number;
+  valgusEvents: number;
+  stabilityScore: number; // 0 - 100%
+  repsCompleted: number;
+}
+
+export interface ClinicalBadge {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  unlocked: boolean;
+  unlockedAt?: string;
+}
+
+export interface Shockwave {
+  x: number;
+  y: number;
+  radius: number;
+  maxRadius: number;
+  alpha: number;
+  color: string;
+}
+
+const DEFAULT_CLINICAL_BADGES: ClinicalBadge[] = [
+  {
+    id: "tendon_vanguard",
+    name: "Tendon Vanguard",
+    icon: "🛡️",
+    description: "Completed set with zero medial knee wobble.",
+    unlocked: false,
+  },
+  {
+    id: "static_anchor",
+    name: "Static Anchor",
+    icon: "⏱️",
+    description: "≥ 20 cumulative seconds held in safe pauses.",
+    unlocked: false,
+  },
+  {
+    id: "kinetic_symmetry",
+    name: "Kinetic Symmetry",
+    icon: "🔄",
+    description: "Left and right joint tracking within < 5% variance.",
+    unlocked: false,
+  },
+];
+
+const DEFAULT_BASELINE_SESSION: RecoverySession = {
+  id: "baseline_day_1",
+  date: "2026-08-29",
+  avgDepthAngle: 108.0,
+  maxHoldDuration: 0.6,
+  valgusEvents: 4,
+  stabilityScore: 65.0,
+  repsCompleted: 6,
+};
+
+export interface AdherenceData {
+  lastSessionDate: string;
+  streakDays: number;
+  restDaysTaken: number;
+  totalSessions: number;
+  restDayActive: boolean;
+}
+
+const DEFAULT_ADHERENCE: AdherenceData = {
+  lastSessionDate: "2026-09-11",
+  streakDays: 7,
+  restDaysTaken: 2,
+  totalSessions: 14,
+  restDayActive: false,
+};
+
+const SEED_RECOVERY_HISTORY: RecoverySession[] = [
+  { id: "rec_1", date: "2026-08-29", avgDepthAngle: 108.0, maxHoldDuration: 0.6, valgusEvents: 4, stabilityScore: 65.0, repsCompleted: 6 },
+  { id: "rec_2", date: "2026-09-01", avgDepthAngle: 104.5, maxHoldDuration: 0.9, valgusEvents: 3, stabilityScore: 72.0, repsCompleted: 8 },
+  { id: "rec_3", date: "2026-09-04", avgDepthAngle: 99.0, maxHoldDuration: 1.2, valgusEvents: 2, stabilityScore: 79.0, repsCompleted: 10 },
+  { id: "rec_4", date: "2026-09-07", avgDepthAngle: 94.5, maxHoldDuration: 1.6, valgusEvents: 1, stabilityScore: 86.0, repsCompleted: 12 },
+  { id: "rec_5", date: "2026-09-09", avgDepthAngle: 91.0, maxHoldDuration: 1.9, valgusEvents: 1, stabilityScore: 91.0, repsCompleted: 14 },
+  { id: "rec_6", date: "2026-09-11", avgDepthAngle: 88.5, maxHoldDuration: 2.2, valgusEvents: 0, stabilityScore: 96.0, repsCompleted: 15 },
+];
+
 // ---------------------------------------------------------------------------
 // Browser Audio Synthesizer (FX + Procedural Audio)
 // ---------------------------------------------------------------------------
@@ -608,6 +695,31 @@ class AudioSynth {
       // safe
     }
   }
+
+  playHarmonicChord() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const freqs = [261.63, 329.63, 392.0, 493.88, 587.33]; // C-Major 9th (C4, E4, G4, B4, D5)
+      const now = this.ctx.currentTime;
+      freqs.forEach((freq) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.exponentialRampToValueAtTime(0.12, now + 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 1.4);
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(now);
+        osc.stop(now + 1.4);
+      });
+    } catch {
+      // safe
+    }
+  }
 }
 
 const synth = new AudioSynth();
@@ -697,6 +809,16 @@ export default function AthleteMindPage() {
   const [leaderboardStatus, setLeaderboardStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
   const [totalTensionTimeSec, setTotalTensionTimeSec] = useState(0);
 
+  // Phase 8: Clinical Mastery Reward Loop & Dedicated Progress Comparison Suite
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [bioCredits, setBioCredits] = useState<number>(350);
+  const [romToast, setRomToast] = useState<string | null>(null);
+  const [isRestDay, setIsRestDay] = useState(false);
+  const [recoveryHistory, setRecoveryHistory] = useState<RecoverySession[]>(SEED_RECOVERY_HISTORY);
+  const [baselineSession, setBaselineSession] = useState<RecoverySession>(DEFAULT_BASELINE_SESSION);
+  const [clinicalBadges, setClinicalBadges] = useState<ClinicalBadge[]>(DEFAULT_CLINICAL_BADGES);
+  const [adherence, setAdherence] = useState<AdherenceData>(DEFAULT_ADHERENCE);
+
   // DOM References
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -714,6 +836,18 @@ export default function AthleteMindPage() {
   const lastHoldTickTimeRef = useRef(0);
   const lastTraceSampleTimeRef = useRef(0);
   const lastSpeechTimeRef = useRef(0);
+
+  // Clinical Mastery & Kinetic Charge Refs (Decoupled from 60FPS React re-renders)
+  const descentStartTimeRef = useRef<number | null>(null);
+  const isDescentControlledRef = useRef(false);
+  const descentEvaluatedRef = useRef(false);
+  const descentWarningTimerRef = useRef(0);
+  const shockwavesRef = useRef<Shockwave[]>([]);
+  const shockwaveTriggeredForHoldRef = useRef(false);
+  const recoveryHistoryRef = useRef<RecoverySession[]>(SEED_RECOVERY_HISTORY);
+  const baselineSessionRef = useRef<RecoverySession>(DEFAULT_BASELINE_SESSION);
+  const bioCreditsRef = useRef<number>(350);
+  const isRestDayRef = useRef(false);
 
   // Fast access mirrors
   const primaryAngleRef = useRef(180);
@@ -743,7 +877,19 @@ export default function AthleteMindPage() {
     modifiersRef.current = modifiers;
   }, [modifiers]);
 
-  // Load vault & callsign on mount
+  useEffect(() => {
+    isRestDayRef.current = isRestDay;
+  }, [isRestDay]);
+
+  useEffect(() => {
+    bioCreditsRef.current = bioCredits;
+  }, [bioCredits]);
+
+  useEffect(() => {
+    recoveryHistoryRef.current = recoveryHistory;
+  }, [recoveryHistory]);
+
+  // Load vault, callsign, and clinical history on mount
   useEffect(() => {
     try {
       const savedVault = localStorage.getItem("athletemind_vault");
@@ -760,6 +906,56 @@ export default function AthleteMindPage() {
       }
       const savedCallsign = localStorage.getItem("athletemind_callsign");
       if (savedCallsign) setCallsign(savedCallsign);
+
+      // Load Recovery History & Clinical Telemetry
+      const savedHistory = localStorage.getItem("athletemind_recovery_history");
+      if (savedHistory) {
+        const parsedHist: RecoverySession[] = JSON.parse(savedHistory);
+        if (Array.isArray(parsedHist) && parsedHist.length > 0) {
+          setRecoveryHistory(parsedHist);
+          recoveryHistoryRef.current = parsedHist;
+        }
+      } else {
+        localStorage.setItem("athletemind_recovery_history", JSON.stringify(SEED_RECOVERY_HISTORY));
+      }
+
+      const savedBaseline = localStorage.getItem("athletemind_baseline_session");
+      if (savedBaseline) {
+        const parsedBase: RecoverySession = JSON.parse(savedBaseline);
+        setBaselineSession(parsedBase);
+        baselineSessionRef.current = parsedBase;
+      } else {
+        localStorage.setItem("athletemind_baseline_session", JSON.stringify(DEFAULT_BASELINE_SESSION));
+      }
+
+      const savedBadges = localStorage.getItem("athletemind_badges");
+      if (savedBadges) {
+        const parsedBadges: ClinicalBadge[] = JSON.parse(savedBadges);
+        setClinicalBadges(parsedBadges);
+      } else {
+        localStorage.setItem("athletemind_badges", JSON.stringify(DEFAULT_CLINICAL_BADGES));
+      }
+
+      const savedAdherence = localStorage.getItem("athletemind_adherence");
+      if (savedAdherence) {
+        const parsedAdh: AdherenceData = JSON.parse(savedAdherence);
+        setAdherence(parsedAdh);
+        setIsRestDay(parsedAdh.restDayActive || false);
+        isRestDayRef.current = parsedAdh.restDayActive || false;
+      } else {
+        localStorage.setItem("athletemind_adherence", JSON.stringify(DEFAULT_ADHERENCE));
+      }
+
+      const savedCredits = localStorage.getItem("athletemind_bio_credits");
+      if (savedCredits) {
+        const creds = parseInt(savedCredits, 10);
+        if (!isNaN(creds)) {
+          setBioCredits(creds);
+          bioCreditsRef.current = creds;
+        }
+      } else {
+        localStorage.setItem("athletemind_bio_credits", "350");
+      }
     } catch {}
   }, []);
 
@@ -1130,6 +1326,140 @@ export default function AthleteMindPage() {
       });
   };
 
+  // Phase 8: Record Session Metrics to Clinical History & Evaluate Badges
+  const recordSessionAndEvaluateBadges = useCallback(() => {
+    if (repCount === 0) return;
+    const sessionDate = new Date().toISOString().split("T")[0];
+    const avgDepth = minSessionAngle < 180 ? minSessionAngle : 90;
+    const maxHold = holdDurations.length > 0 ? Math.max(...holdDurations) : targetHoldDuration;
+    const totalHold = holdDurations.reduce((a, b) => a + b, 0);
+
+    const newSession: RecoverySession = {
+      id: `rec_${Date.now()}`,
+      date: sessionDate,
+      avgDepthAngle: avgDepth,
+      maxHoldDuration: Number(maxHold.toFixed(1)),
+      valgusEvents: valgusCount,
+      stabilityScore: formPurity,
+      repsCompleted: repCount,
+    };
+
+    setRecoveryHistory((prev) => {
+      const updated = [...prev, newSession];
+      recoveryHistoryRef.current = updated;
+      try {
+        localStorage.setItem("athletemind_recovery_history", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // Update Adherence Record
+    setAdherence((prev) => {
+      const updated: AdherenceData = {
+        ...prev,
+        lastSessionDate: sessionDate,
+        totalSessions: prev.totalSessions + 1,
+        streakDays: prev.lastSessionDate === sessionDate ? prev.streakDays : prev.streakDays + 1,
+      };
+      try {
+        localStorage.setItem("athletemind_adherence", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // Evaluate Clinical Mastery Badges
+    setClinicalBadges((prevBadges) => {
+      const updated = prevBadges.map((b) => {
+        if (b.unlocked) return b;
+        let unlocked = false;
+        if (b.id === "tendon_vanguard" && valgusCount === 0 && repCount >= 5) {
+          unlocked = true;
+        } else if (b.id === "static_anchor" && totalHold >= 20) {
+          unlocked = true;
+        } else if (b.id === "kinetic_symmetry" && formPurity >= 90 && repCount >= 5) {
+          unlocked = true;
+        }
+        if (unlocked) {
+          synth.playHarmonicChord();
+          return { ...b, unlocked: true, unlockedAt: sessionDate };
+        }
+        return b;
+      });
+      try {
+        localStorage.setItem("athletemind_badges", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  }, [repCount, minSessionAngle, holdDurations, targetHoldDuration, valgusCount, formPurity]);
+
+  // Rest-Day Mode Toggle (Locks Combat Hazards, Preserves Daily Streak)
+  const handleToggleRestDay = () => {
+    setIsRestDay((prev) => {
+      const next = !prev;
+      isRestDayRef.current = next;
+      setAdherence((adh) => {
+        const updated = {
+          ...adh,
+          restDayActive: next,
+          restDaysTaken: next ? adh.restDaysTaken + 1 : adh.restDaysTaken,
+        };
+        try {
+          localStorage.setItem("athletemind_adherence", JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      speakCoachCue(next ? "System regeneration active. Rest day protocol engaged." : "Combat protocol engaged.");
+      return next;
+    });
+  };
+
+  // Clinician Telemetry Full CSV Export Action
+  const handleExportClinicalCsv = () => {
+    const headers = [
+      "Date",
+      "Session_ID",
+      "Reps_Completed",
+      "Avg_Depth_Angle_Deg",
+      "Max_Hold_Duration_s",
+      "Valgus_Events",
+      "Stability_Score_Pct",
+      "Rest_Day_Active"
+    ];
+    const rows = recoveryHistory.map((s) => [
+      s.date,
+      s.id,
+      s.repsCompleted,
+      s.avgDepthAngle,
+      s.maxHoldDuration,
+      s.valgusEvents,
+      s.stabilityScore,
+      isRestDay ? "YES" : "NO",
+    ]);
+
+    if (repCount > 0) {
+      rows.push([
+        new Date().toISOString().split("T")[0],
+        `live_session_${Date.now()}`,
+        repCount,
+        minSessionAngle < 180 ? minSessionAngle : 90,
+        holdDurations.length > 0 ? Math.max(...holdDurations) : targetHoldDuration,
+        valgusCount,
+        formPurity,
+        isRestDay ? "YES" : "NO",
+      ]);
+    }
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `athletemind_clinical_telemetry_${callsign}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    speakCoachCue("Clinical telemetry CSV generated");
+  };
+
   // Boss Attack & Overheat Timer
   useEffect(() => {
     if (matchStatus !== "ACTIVE") return;
@@ -1159,24 +1489,32 @@ export default function AthleteMindPage() {
       if (!isSocketActive && holdProgressRef.current === 0) {
         setBossAttackTimer((prevTimer) => {
           if (prevTimer <= 0.1) {
-            synth.playBossAttack();
-            screenShakeRef.current = 22;
-
-            setPlayerHp((hp) => {
-              const nextHp = Math.max(0, hp - 20);
-              if (nextHp <= 0) {
-                setMatchStatus("DEFEAT");
-                setShowClinicianModal(true);
-                synth.playDefeat();
-                speakCoachCue("Mission failed. Retreat and recover.");
+            if (isRestDayRef.current) {
+              // Clinical Rest Day Shield: Zero Combat Damage
+              const canvas = canvasRef.current;
+              if (canvas) {
+                spawnFloatingText("🌿 RESTORATIVE SHIELD (0 DMG)", canvas.width / 2, canvas.height / 2, "#10b981", 32);
               }
-              return nextHp;
-            });
+            } else {
+              synth.playBossAttack();
+              screenShakeRef.current = 22;
 
-            const canvas = canvasRef.current;
-            if (canvas) {
-              spawnParticles(canvas.width / 2, canvas.height * 0.4, 35, "#ff0055");
-              spawnFloatingText("-20 BOSS STRIKE!", canvas.width / 2, canvas.height / 2, "#ff0055", 34);
+              setPlayerHp((hp) => {
+                const nextHp = Math.max(0, hp - 20);
+                if (nextHp <= 0) {
+                  setMatchStatus("DEFEAT");
+                  setShowClinicianModal(true);
+                  synth.playDefeat();
+                  speakCoachCue("Mission failed. Retreat and recover.");
+                }
+                return nextHp;
+              });
+
+              const canvas = canvasRef.current;
+              if (canvas) {
+                spawnParticles(canvas.width / 2, canvas.height * 0.4, 35, "#ff0055");
+                spawnFloatingText("-20 BOSS STRIKE!", canvas.width / 2, canvas.height / 2, "#ff0055", 34);
+              }
             }
 
             return isEnragedRef.current ? 6.0 : 10.0;
@@ -1207,13 +1545,19 @@ export default function AthleteMindPage() {
         energyCores: currentVault.energyCores + earned,
       });
       fetchLeaderboard();
+
+      // Phase 8: Record clinical recovery telemetry and evaluate badges
+      recordSessionAndEvaluateBadges();
     } else if (playerHp <= 0 && matchStatus === "ACTIVE") {
       setMatchStatus("DEFEAT");
       setShowClinicianModal(true);
       synth.playDefeat();
       speakCoachCue("Mission failed. Recover and retry.");
+
+      // Phase 8: Record clinical recovery telemetry and evaluate badges
+      recordSessionAndEvaluateBadges();
     }
-  }, [bossHp, playerHp, matchStatus, formPurity, speakCoachCue, updateVault, fetchLeaderboard]);
+  }, [bossHp, playerHp, matchStatus, formPurity, speakCoachCue, updateVault, fetchLeaderboard, recordSessionAndEvaluateBadges]);
 
   // ---------------------------------------------------------------------------
   // Canvas Render Loop with Dynamic Color-Coded Kinematic Skeleton
@@ -1439,6 +1783,136 @@ export default function AthleteMindPage() {
         ctx.fillText(`${Math.round(primaryAngleRef.current)}°`, targetJoint.x, targetJoint.y - radius - 6);
         ctx.restore();
       }
+
+      // ---------------------------------------------------------------------
+      // Kinetic Charge: Eccentric Descent Velocity Tracking & Hold Payoff
+      // ---------------------------------------------------------------------
+      const pAngle = primaryAngleRef.current;
+      const nowSec = performance.now() / 1000;
+
+      // Start tracking descent when flexion begins (< 155°)
+      if (pAngle < 155 && descentStartTimeRef.current === null) {
+        descentStartTimeRef.current = nowSec;
+        descentEvaluatedRef.current = false;
+        isDescentControlledRef.current = false;
+      }
+
+      // Evaluate descent when reaching inflection depth (< 100°) or active hold
+      if ((pAngle <= 100 || holdProgressRef.current > 0) && !descentEvaluatedRef.current && descentStartTimeRef.current !== null) {
+        const descentDuration = nowSec - descentStartTimeRef.current;
+        descentEvaluatedRef.current = true;
+        if (descentDuration >= 2.0) {
+          isDescentControlledRef.current = true;
+        } else if (descentDuration < 1.0) {
+          isDescentControlledRef.current = false;
+          descentWarningTimerRef.current = performance.now() + 2000;
+        }
+      }
+
+      // Reset upon returning to full extension (>= 160°)
+      if (pAngle >= 160) {
+        descentStartTimeRef.current = null;
+        descentEvaluatedRef.current = false;
+        isDescentControlledRef.current = false;
+        shockwaveTriggeredForHoldRef.current = false;
+      }
+
+      // Render Kinetic Charge Ring (Controlled Descent >= 2.0s)
+      if (isDescentControlledRef.current) {
+        const pulse = 26 + 6 * Math.sin(performance.now() * 0.008);
+        const ringTargets = [lKnee, rKnee].filter(Boolean);
+        if (ringTargets.length === 0 && targetJoint) ringTargets.push(targetJoint);
+
+        ringTargets.forEach((jt) => {
+          if (!jt) return;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(jt.x, jt.y, pulse, 0, Math.PI * 2);
+          ctx.strokeStyle = "#00f0ff";
+          ctx.lineWidth = 3.5;
+          ctx.shadowColor = "#10b981";
+          ctx.shadowBlur = 18;
+          ctx.stroke();
+
+          // Outer dashed kinetic ring
+          ctx.beginPath();
+          ctx.setLineDash([6, 4]);
+          ctx.arc(jt.x, jt.y, pulse + 6, 0, Math.PI * 2);
+          ctx.strokeStyle = "#10b981";
+          ctx.lineWidth = 2.0;
+          ctx.stroke();
+          ctx.restore();
+        });
+
+        // Kinetic charge HUD label
+        if (targetJoint) {
+          ctx.save();
+          ctx.fillStyle = "#10b981";
+          ctx.font = "bold 11px monospace";
+          ctx.textAlign = "center";
+          ctx.shadowColor = "#00f0ff";
+          ctx.shadowBlur = 8;
+          ctx.fillText("⚡ KINETIC CHARGE", targetJoint.x, targetJoint.y + 48);
+          ctx.restore();
+        }
+      }
+
+      // Render Rushed Descent Alert (< 1.0s)
+      if (descentWarningTimerRef.current > performance.now()) {
+        const remaining = (descentWarningTimerRef.current - performance.now()) / 2000;
+        const ringTargets = [lKnee, rKnee].filter(Boolean);
+        if (ringTargets.length === 0 && targetJoint) ringTargets.push(targetJoint);
+
+        ringTargets.forEach((jt) => {
+          if (!jt) return;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(jt.x, jt.y, 36 + (1 - remaining) * 22, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 42, 95, ${remaining})`;
+          ctx.lineWidth = 3.5;
+          ctx.stroke();
+          ctx.restore();
+        });
+
+        ctx.save();
+        ctx.fillStyle = "#ff2a5f";
+        ctx.font = "bold 13px monospace";
+        ctx.textAlign = "center";
+        ctx.shadowColor = "#ff0055";
+        ctx.shadowBlur = 12;
+        ctx.fillText("CONTROL DESCENT // PROTECT TENDONS", width / 2, height * 0.74);
+        ctx.restore();
+      }
+
+      // Therapeutic Isometric Hold Payoff (Hold >= 1.5s with Controlled Descent)
+      if (
+        holdProgressRef.current >= 0.95 &&
+        isDescentControlledRef.current &&
+        !shockwaveTriggeredForHoldRef.current &&
+        targetJoint
+      ) {
+        shockwaveTriggeredForHoldRef.current = true;
+        // Detonate golden radial shockwave
+        shockwavesRef.current.push({
+          x: targetJoint.x,
+          y: targetJoint.y,
+          radius: 15,
+          maxRadius: Math.max(width, height) * 0.95,
+          alpha: 1.0,
+          color: "#ffd700",
+        });
+        synth.playHarmonicChord();
+        setBossHp((prev) => Math.max(0, prev - 150));
+        spawnParticles(targetJoint.x, targetJoint.y, 45, "#ffd700");
+        spawnFloatingText("-150 PURE STRIKE!", targetJoint.x, targetJoint.y - 35, "#ffd700", 38);
+        setBioCredits((prev) => {
+          const updated = prev + 25;
+          try {
+            localStorage.setItem("athletemind_bio_credits", updated.toString());
+          } catch {}
+          return updated;
+        });
+      }
     }
 
     // 4. Update & Render Particles
@@ -1490,7 +1964,37 @@ export default function AthleteMindPage() {
       ctx.fillText(t.text, t.x, t.y);
       ctx.restore();
     }
-  }, []);
+
+    // 6. Expanding Clinical Golden Shockwaves
+    const shockwaves = shockwavesRef.current;
+    for (let i = shockwaves.length - 1; i >= 0; i--) {
+      const s = shockwaves[i];
+      s.radius += 14;
+      s.alpha = Math.max(0, 1.0 - s.radius / s.maxRadius);
+
+      if (s.alpha <= 0 || s.radius >= s.maxRadius) {
+        shockwaves.splice(i, 1);
+        continue;
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = 5.0 * s.alpha;
+      ctx.shadowColor = s.color;
+      ctx.shadowBlur = 20;
+      ctx.globalAlpha = s.alpha;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, Math.max(0, s.radius - 12), 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.0 * s.alpha;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }, [spawnFloatingText, spawnParticles]);
 
   // ---------------------------------------------------------------------------
   // Continuous MediaPipe Pose Loop & WebSocket Connection (Bilateral 3D Stream)
@@ -1656,7 +2160,7 @@ export default function AthleteMindPage() {
         if (data.total_tension_time_sec !== undefined) {
           setTotalTensionTimeSec(data.total_tension_time_sec);
         }
-        if (data.player_hp !== undefined) {
+        if (data.player_hp !== undefined && !isRestDayRef.current) {
           setPlayerHp(data.player_hp);
         }
         if (data.boss_state) {
@@ -1693,17 +2197,24 @@ export default function AthleteMindPage() {
 
         // Handle Parry Failure (Heavy Direct Hit)
         if (data.parry_failed) {
-          synth.playStun();
-          synth.playBossAttack();
-          screenShakeRef.current = 30;
-          setScreenGlitch(true);
-          setTimeout(() => setScreenGlitch(false), 500);
-          setCombatBanner("PARRY FAILED - DIRECT HIT TAKEN (-35 HP)!");
-          setCombatBannerType("EGO_LIFT");
-          const canvas = canvasRef.current;
-          if (canvas) {
-            spawnParticles(canvas.width / 2, canvas.height * 0.5, 40, "#ff0055");
-            spawnFloatingText("-35 HP BOSS CRUSH!", canvas.width / 2, canvas.height * 0.5, "#ff0055", 36);
+          if (isRestDayRef.current) {
+            const canvas = canvasRef.current;
+            if (canvas) {
+              spawnFloatingText("🌿 RESTORATIVE SHIELD (0 DMG)", canvas.width / 2, canvas.height * 0.5, "#10b981", 32);
+            }
+          } else {
+            synth.playStun();
+            synth.playBossAttack();
+            screenShakeRef.current = 30;
+            setScreenGlitch(true);
+            setTimeout(() => setScreenGlitch(false), 500);
+            setCombatBanner("PARRY FAILED - DIRECT HIT TAKEN (-35 HP)!");
+            setCombatBannerType("EGO_LIFT");
+            const canvas = canvasRef.current;
+            if (canvas) {
+              spawnParticles(canvas.width / 2, canvas.height * 0.5, 40, "#ff0055");
+              spawnFloatingText("-35 HP BOSS CRUSH!", canvas.width / 2, canvas.height * 0.5, "#ff0055", 36);
+            }
           }
         }
 
@@ -1747,12 +2258,19 @@ export default function AthleteMindPage() {
           setEgoLiftsCount((c) => c + 1);
 
           if (data.damage_taken && data.damage_taken > 0) {
-            synth.playStun();
-            screenShakeRef.current = 18;
-            setPlayerHp((prev) => Math.max(0, prev - data.damage_taken!));
-            const canvas = canvasRef.current;
-            if (canvas) {
-              spawnFloatingText(`-${data.damage_taken} HP STUN`, canvas.width / 2, canvas.height / 2 + 50, "#ff0055", 34);
+            if (isRestDayRef.current) {
+              const canvas = canvasRef.current;
+              if (canvas) {
+                spawnFloatingText("🌿 RESTORATIVE SHIELD (0 DMG)", canvas.width / 2, canvas.height / 2 + 50, "#10b981", 32);
+              }
+            } else {
+              synth.playStun();
+              screenShakeRef.current = 18;
+              setPlayerHp((prev) => Math.max(0, prev - data.damage_taken!));
+              const canvas = canvasRef.current;
+              if (canvas) {
+                spawnFloatingText(`-${data.damage_taken} HP STUN`, canvas.width / 2, canvas.height / 2 + 50, "#ff0055", 34);
+              }
             }
           }
         } else if (data.status === "hit" || data.event === "HOLD_HIT" || data.event === "REP_COMPLETE") {
@@ -1787,12 +2305,13 @@ export default function AthleteMindPage() {
             }
             const holdDur = Math.max(1.0, data.hold_time || 1.5);
             setHoldDurations((prev) => [...prev, holdDur]);
+            const repDepth = Math.round(currentPriAngle || 90);
             setRepDetails((prev) => [
               ...prev,
               {
                 repIndex: data.rep_count,
                 exercise: exerciseRef.current,
-                minAngle: Math.round(currentPriAngle || 90),
+                minAngle: repDepth,
                 holdDuration: holdDur,
                 purityScore: data.purity || 100,
                 verdict: data.has_fault ? (data.fault_type?.toUpperCase() || "FAULT") : "OPTIMAL",
@@ -1800,6 +2319,34 @@ export default function AthleteMindPage() {
                 timestamp: new Date().toLocaleTimeString(),
               },
             ]);
+
+            // Phase 8: Clinical ROM Milestone Check (7-Day Historical Rolling Average)
+            const hist = recoveryHistoryRef.current;
+            const baseline = baselineSessionRef.current;
+            const recentSessions = hist.slice(-7);
+            const historicalAvg = recentSessions.length > 0
+              ? recentSessions.reduce((acc, s) => acc + s.avgDepthAngle, 0) / recentSessions.length
+              : baseline.avgDepthAngle;
+
+            if (repDepth <= historicalAvg - 2.0 && (!data.has_fault || data.fault_type !== "valgus")) {
+              const deltaGain = Math.round(historicalAvg - repDepth);
+              const toastText = `+${deltaGain}° MOBILITY MILESTONE UNLOCKED! (+100 Bio-Credits)`;
+              setRomToast(toastText);
+              synth.playHarmonicChord();
+              setBioCredits((prev) => {
+                const updated = prev + 100;
+                try {
+                  localStorage.setItem("athletemind_bio_credits", updated.toString());
+                } catch {}
+                return updated;
+              });
+              const canvas = canvasRef.current;
+              if (canvas) {
+                spawnParticles(canvas.width / 2, canvas.height * 0.35, 45, "#ffd700");
+                spawnFloatingText(`+${deltaGain}° MOBILITY MILESTONE!`, canvas.width / 2, canvas.height * 0.3, "#ffd700", 34);
+              }
+              setTimeout(() => setRomToast(null), 4500);
+            }
           }
         } else if (data.phase === "HOLDING") {
           setIsStunned(false);
@@ -2089,6 +2636,15 @@ export default function AthleteMindPage() {
                 </div>
               </div>
 
+              {/* Bio-Restoration Credits Indicator */}
+              <div
+                className="px-2.5 py-1.5 rounded-xl bg-cyan-950/70 border border-cyan-500/50 text-xs font-black text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.3)] flex items-center gap-1.5"
+                title="Bio-Restoration Credits (Earned via Controlled Movement & Milestones)"
+              >
+                <span>💎</span>
+                <span>{bioCredits} CREDITS</span>
+              </div>
+
               {/* Energy Cores Indicator */}
               <button
                 onClick={() => setShowVaultModal(true)}
@@ -2097,6 +2653,28 @@ export default function AthleteMindPage() {
               >
                 <span>⚡</span>
                 <span>{vault.energyCores} CORES</span>
+              </button>
+
+              {/* Clinical Rest-Day Toggle */}
+              <button
+                onClick={handleToggleRestDay}
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  isRestDay
+                    ? "bg-emerald-950/90 border-emerald-400 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse"
+                    : "bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-400"
+                }`}
+                title="Toggle Clinical Rest Day (Locks combat hazards, preserves streak)"
+              >
+                <span>{isRestDay ? "🌿 REST ON" : "🌿 REST OFF"}</span>
+              </button>
+
+              {/* Recovery Trajectory Modal Button */}
+              <button
+                onClick={() => setShowProgressModal(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-teal-950/80 hover:bg-teal-900 border border-teal-500/60 text-xs font-bold text-teal-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(20,184,166,0.4)] flex items-center gap-1.5"
+                title="Open Dedicated Recovery Trajectory & Day 1 Comparison"
+              >
+                <span>📈 RECOVERY</span>
               </button>
 
               {/* Armory Vault Button */}
@@ -2132,6 +2710,24 @@ export default function AthleteMindPage() {
           </header>
         );
       })()}
+
+      {/* Clinical Rest Day Serenity Banner */}
+      {isRestDay && (
+        <div className="relative z-20 w-full bg-gradient-to-r from-emerald-950/95 via-teal-900/95 to-emerald-950/95 border-b border-emerald-500/50 py-1.5 px-4 text-center text-[11px] font-bold uppercase tracking-widest text-emerald-200 flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+          <span className="text-emerald-400">🌿</span>
+          <span>SYSTEM REGENERATION ACTIVE // REST PRESERVES YOUR STREAK • COMBAT HAZARDS ZEROED</span>
+          <span className="text-emerald-400">🌿</span>
+        </div>
+      )}
+
+      {/* Real-Time ROM Milestone Toast Banner */}
+      {romToast && (
+        <div className="relative z-20 w-full bg-gradient-to-r from-amber-950/95 via-yellow-900/95 to-amber-950/95 border-b border-amber-400/80 py-2 px-4 text-center text-xs font-black uppercase tracking-widest text-amber-200 flex items-center justify-center gap-2 animate-bounce shadow-[0_0_25px_rgba(245,158,11,0.6)]">
+          <span className="text-yellow-300">🌟</span>
+          <span>{romToast}</span>
+          <span className="text-yellow-300">🌟</span>
+        </div>
+      )}
 
       {/* Dynamic Boss Enraged Alert Banner */}
       {isEnraged && matchStatus === "ACTIVE" && (
@@ -2620,16 +3216,25 @@ export default function AthleteMindPage() {
             {/* Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-3 w-full">
               <button
-                onClick={handleDownloadCsv}
-                className="flex-1 py-3 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-cyan-400 text-slate-200 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+                onClick={() => {
+                  setShowClinicianModal(false);
+                  setShowProgressModal(true);
+                }}
+                className="flex-1 py-3 px-4 rounded-2xl bg-teal-950/80 hover:bg-teal-900 border border-teal-500/60 hover:border-teal-400 text-teal-200 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
               >
-                <span>📥 DOWNLOAD TELEMETRY (CSV)</span>
+                <span>📈 RECOVERY TRAJECTORY</span>
+              </button>
+              <button
+                onClick={handleDownloadCsv}
+                className="flex-1 py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-cyan-400 text-slate-200 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+              >
+                <span>📥 TELEMETRY (CSV)</span>
               </button>
               <button
                 onClick={handleResetCombat}
-                className="flex-1 py-3 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2"
+                className="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2"
               >
-                <span>⚔️ NEXT TARGET / RESTART</span>
+                <span>⚔️ NEXT TARGET</span>
               </button>
             </div>
           </div>
@@ -3007,6 +3612,363 @@ export default function AthleteMindPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* 7. PHASE 8 DEDICATED PROGRESS COMPARISON & RECOVERY TRAJECTORY MODAL */}
+      {/* ------------------------------------------------------------------- */}
+      {showProgressModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <div className="relative w-full max-w-5xl bg-[#070a13] border border-teal-500/40 rounded-3xl p-6 sm:p-8 shadow-[0_0_80px_rgba(20,184,166,0.25)] flex flex-col gap-6 animate-in fade-in zoom-in duration-300 max-h-[92vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-800 pb-4 gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-teal-950/80 border border-teal-400/50 flex items-center justify-center text-2xl shadow-[0_0_15px_rgba(20,184,166,0.4)]">
+                  📈
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-teal-300">
+                      Recovery Trajectory & Baseline Comparison
+                    </h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-teal-950 border border-teal-500/60 text-teal-300">
+                      Patient #{callsign}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Protocol Day 14 • 🌿 Kinetic Stabilization Phase • Non-Competitive Mastery Focus
+                  </p>
+                </div>
+              </div>
+
+              {/* Header Badges & Actions */}
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                <div className="px-3 py-1.5 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-xs font-black text-cyan-300">
+                  💎 {bioCredits} CREDITS
+                </div>
+                <div className="px-3 py-1.5 rounded-xl bg-amber-950/60 border border-amber-500/40 text-xs font-black text-amber-300">
+                  🔥 {adherence.streakDays}D STREAK
+                </div>
+                <button
+                  onClick={handleToggleRestDay}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    isRestDay
+                      ? "bg-emerald-950/90 border-emerald-400 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                      : "bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200"
+                  }`}
+                  title="Toggle Rest Day Mode"
+                >
+                  {isRestDay ? "🌿 REST ON" : "🌿 REST OFF"}
+                </button>
+                <button
+                  onClick={() => setShowProgressModal(false)}
+                  className="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold flex items-center justify-center cursor-pointer transition-all"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Split Delta Comparison Cards (Day 1 Baseline vs Current/Today) */}
+            {(() => {
+              const todayDepth = (repCount > 0 && minSessionAngle < 180)
+                ? minSessionAngle
+                : (recoveryHistory[recoveryHistory.length - 1]?.avgDepthAngle || 88.5);
+              const todayHold = holdDurations.length > 0
+                ? Math.max(...holdDurations)
+                : (recoveryHistory[recoveryHistory.length - 1]?.maxHoldDuration || 2.2);
+              const todayValgus = repCount > 0
+                ? valgusCount
+                : (recoveryHistory[recoveryHistory.length - 1]?.valgusEvents ?? 0);
+              const depthDelta = Number((baselineSession.avgDepthAngle - todayDepth).toFixed(1));
+              const holdDelta = Number((todayHold - baselineSession.maxHoldDuration).toFixed(1));
+              const valgusReduction = baselineSession.valgusEvents > 0
+                ? Math.max(0, Math.round(((baselineSession.valgusEvents - todayValgus) / baselineSession.valgusEvents) * 100))
+                : 100;
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Card 1: ROM Flexion */}
+                  <div className="p-5 rounded-2xl bg-[#0a0f1e] border border-teal-500/30 hover:border-teal-500/60 transition-all flex flex-col gap-3 shadow-lg">
+                    <div className="flex items-center justify-between text-xs text-slate-400 uppercase font-bold tracking-wider">
+                      <span>ROM Flexion Depth</span>
+                      <span className="text-teal-400">📐 Mobility</span>
+                    </div>
+                    <div className="flex items-baseline justify-between">
+                      <div>
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Day 1 Baseline</div>
+                        <div className="text-xl font-mono text-slate-400">{baselineSession.avgDepthAngle.toFixed(1)}°</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-teal-400 uppercase font-bold">Today</div>
+                        <div className="text-2xl font-black font-mono text-teal-300">{todayDepth.toFixed(1)}°</div>
+                      </div>
+                    </div>
+                    <div className="px-3 py-1 rounded-xl bg-teal-950/70 border border-teal-500/40 text-xs font-black text-teal-300 flex items-center justify-between">
+                      <span>{depthDelta >= 0 ? `+${depthDelta}° GAIN` : `${depthDelta}°`}</span>
+                      <span className="text-[10px] font-mono uppercase text-teal-400">Parallel Achieved</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Symmetric bilateral descent verified. Adductor stretch tolerance and ankle dorsiflexion restored.
+                    </p>
+                  </div>
+
+                  {/* Card 2: Tendon Hold Endurance */}
+                  <div className="p-5 rounded-2xl bg-[#0a0f1e] border border-cyan-500/30 hover:border-cyan-500/60 transition-all flex flex-col gap-3 shadow-lg">
+                    <div className="flex items-center justify-between text-xs text-slate-400 uppercase font-bold tracking-wider">
+                      <span>Tendon Hold Capacity</span>
+                      <span className="text-cyan-400">⏱️ Isometric</span>
+                    </div>
+                    <div className="flex items-baseline justify-between">
+                      <div>
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Day 1 Baseline</div>
+                        <div className="text-xl font-mono text-slate-400">{baselineSession.maxHoldDuration.toFixed(1)}s</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-cyan-400 uppercase font-bold">Today</div>
+                        <div className="text-2xl font-black font-mono text-cyan-300">{todayHold.toFixed(1)}s</div>
+                      </div>
+                    </div>
+                    <div className="px-3 py-1 rounded-xl bg-cyan-950/70 border border-cyan-500/40 text-xs font-black text-cyan-300 flex items-center justify-between">
+                      <span>{holdDelta >= 0 ? `+${holdDelta}s CAPACITY` : `${holdDelta}s`}</span>
+                      <span className="text-[10px] font-mono uppercase text-cyan-400">Safe Pause Verified</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Patellar tendon collagen remodeled via controlled bottom holds, neutralizing patellofemoral shear forces.
+                    </p>
+                  </div>
+
+                  {/* Card 3: Valgus Reduction */}
+                  <div className="p-5 rounded-2xl bg-[#0a0f1e] border border-purple-500/30 hover:border-purple-500/60 transition-all flex flex-col gap-3 shadow-lg">
+                    <div className="flex items-center justify-between text-xs text-slate-400 uppercase font-bold tracking-wider">
+                      <span>Medial Knee Wobble</span>
+                      <span className="text-purple-400">🔄 Valgus Guard</span>
+                    </div>
+                    <div className="flex items-baseline justify-between">
+                      <div>
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Day 1 Baseline</div>
+                        <div className="text-xl font-mono text-slate-400">{baselineSession.valgusEvents} Faults</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-purple-400 uppercase font-bold">Today</div>
+                        <div className="text-2xl font-black font-mono text-purple-300">{todayValgus} Faults</div>
+                      </div>
+                    </div>
+                    <div className="px-3 py-1 rounded-xl bg-purple-950/70 border border-purple-500/40 text-xs font-black text-purple-300 flex items-center justify-between">
+                      <span>{valgusReduction}% REDUCTION</span>
+                      <span className="text-[10px] font-mono uppercase text-purple-400">Frontal Stability</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Gluteus medius neuromuscular recruitment stabilized; bilateral knees track cleanly through the coronal plane.
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Visual Progression Strip: Minimalist SVG Polyline Graph */}
+            <div className="p-5 rounded-2xl bg-[#0a0f1e] border border-slate-800 flex flex-col gap-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                    <span>📊 14-Day Knee Flexion Depth Trajectory</span>
+                    <span className="text-[10px] text-emerald-400 font-mono font-normal">
+                      [Trending Toward 90° Therapeutic Target]
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Knee joint angle at nadir across protocol sessions. Lower values represent deeper parallel squats.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 text-[10px] text-slate-400 font-mono">
+                  <div className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 bg-emerald-400 inline-block" />
+                    <span>90° Therapeutic Target</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 bg-cyan-400 inline-block" />
+                    <span>Patient Trajectory</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* SVG Curve Container */}
+              <div className="w-full h-44 bg-black/60 rounded-xl p-3 border border-slate-800/80 relative overflow-hidden">
+                {(() => {
+                  const points = recoveryHistory;
+                  if (!points || points.length === 0) return null;
+
+                  const width = 640;
+                  const height = 140;
+                  const paddingX = 45;
+                  const paddingY = 22;
+
+                  // Map angles (115 deg down to 75 deg)
+                  const minA = 75;
+                  const maxA = 115;
+                  const getY = (angle: number) => {
+                    const clamped = Math.max(minA, Math.min(maxA, angle));
+                    return paddingY + ((clamped - minA) / (maxA - minA)) * (height - 2 * paddingY);
+                  };
+
+                  const getX = (idx: number) => {
+                    if (points.length === 1) return width / 2;
+                    return paddingX + (idx / (points.length - 1)) * (width - 2 * paddingX);
+                  };
+
+                  const polyCoords = points.map((p, idx) => `${getX(idx)},${getY(p.avgDepthAngle)}`).join(" ");
+                  const targetY = getY(90);
+
+                  return (
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+                      <defs>
+                        <linearGradient id="curveGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stopColor="#06b6d4" />
+                          <stop offset="100%" stopColor="#10b981" />
+                        </linearGradient>
+                        <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.25" />
+                          <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+                        </linearGradient>
+                      </defs>
+
+                      {/* Horizontal Gridlines */}
+                      <line x1={paddingX} y1={getY(110)} x2={width - paddingX} y2={getY(110)} stroke="#1e293b" strokeDasharray="3 3" />
+                      <text x={paddingX - 6} y={getY(110) + 3} fill="#64748b" fontSize="9" textAnchor="end" fontFamily="monospace">110°</text>
+
+                      <line x1={paddingX} y1={targetY} x2={width - paddingX} y2={targetY} stroke="#10b981" strokeWidth="1.5" strokeDasharray="5 4" />
+                      <text x={paddingX - 6} y={targetY + 3} fill="#10b981" fontSize="9" textAnchor="end" fontFamily="monospace" fontWeight="bold">90°</text>
+                      <text x={width - paddingX + 6} y={targetY + 3} fill="#10b981" fontSize="9" textAnchor="start" fontFamily="monospace">TARGET</text>
+
+                      <line x1={paddingX} y1={getY(80)} x2={width - paddingX} y2={getY(80)} stroke="#1e293b" strokeDasharray="3 3" />
+                      <text x={paddingX - 6} y={getY(80) + 3} fill="#64748b" fontSize="9" textAnchor="end" fontFamily="monospace">80°</text>
+
+                      {/* Area Fill Under Curve */}
+                      {points.length > 1 && (
+                        <polygon
+                          points={`${getX(0)},${height - paddingY} ${polyCoords} ${getX(points.length - 1)},${height - paddingY}`}
+                          fill="url(#areaGradient)"
+                        />
+                      )}
+
+                      {/* Main Trajectory Curve */}
+                      <polyline
+                        points={polyCoords}
+                        fill="none"
+                        stroke="url(#curveGradient)"
+                        strokeWidth="3.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+
+                      {/* Points & Labels */}
+                      {points.map((p, idx) => {
+                        const cx = getX(idx);
+                        const cy = getY(p.avgDepthAngle);
+                        return (
+                          <g key={p.id}>
+                            <circle cx={cx} cy={cy} r="5.5" fill="#070a13" stroke="#00f0ff" strokeWidth="2.5" />
+                            <circle cx={cx} cy={cy} r="2.5" fill="#ffffff" />
+                            <text
+                              x={cx}
+                              y={cy - 10}
+                              fill="#e2e8f0"
+                              fontSize="10"
+                              fontWeight="bold"
+                              fontFamily="monospace"
+                              textAnchor="middle"
+                            >
+                              {p.avgDepthAngle}°
+                            </text>
+                            <text
+                              x={cx}
+                              y={height - 6}
+                              fill="#64748b"
+                              fontSize="8.5"
+                              fontFamily="monospace"
+                              textAnchor="middle"
+                            >
+                              {p.date.slice(5)}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Clinical Mastery Badges Showcase */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-300">
+                  🏆 Clinical Mastery Badges
+                </h3>
+                <span className="text-[11px] text-teal-400 font-mono">
+                  {clinicalBadges.filter((b) => b.unlocked).length} / {clinicalBadges.length} Unlocked
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {clinicalBadges.map((badge) => (
+                  <div
+                    key={badge.id}
+                    className={`p-4 rounded-2xl border transition-all flex flex-col gap-2 ${
+                      badge.unlocked
+                        ? "bg-teal-950/30 border-teal-500/60 shadow-[0_0_15px_rgba(20,184,166,0.2)]"
+                        : "bg-black/40 border-slate-800 opacity-75"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">{badge.icon}</span>
+                        <span className="text-xs font-black uppercase text-slate-200">{badge.name}</span>
+                      </div>
+                      <span
+                        className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase ${
+                          badge.unlocked
+                            ? "bg-teal-950 border border-teal-400 text-teal-300"
+                            : "bg-slate-900 border border-slate-700 text-slate-500"
+                        }`}
+                      >
+                        {badge.unlocked ? "UNLOCKED 🛡️" : "LOCKED 🔒"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">{badge.description}</p>
+                    {badge.unlocked && badge.unlockedAt && (
+                      <div className="text-[9px] text-teal-400/80 font-mono mt-auto">
+                        Earned on {badge.unlockedAt}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Modal Footer / Telemetry Actions */}
+            <div className="flex flex-col sm:flex-row items-center justify-between border-t border-slate-800 pt-4 gap-3">
+              <div className="text-xs text-slate-400 font-mono">
+                Adherence: <span className="text-emerald-400 font-bold">{adherence.streakDays}d Streak</span> • Total Sessions:{" "}
+                <span className="text-slate-200 font-bold">{adherence.totalSessions}</span> • Rest Days Taken:{" "}
+                <span className="text-teal-400 font-bold">{adherence.restDaysTaken}</span>
+              </div>
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <button
+                  onClick={handleExportClinicalCsv}
+                  className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-teal-950 hover:bg-teal-900 border border-teal-500/70 hover:border-teal-400 text-teal-200 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(20,184,166,0.3)] flex items-center justify-center gap-2"
+                >
+                  <span>📥 DOWNLOAD CLINICAL CSV</span>
+                </button>
+                <button
+                  onClick={() => setShowProgressModal(false)}
+                  className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+                >
+                  Close Trajectory
+                </button>
+              </div>
             </div>
           </div>
         </div>
