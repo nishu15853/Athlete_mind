@@ -268,7 +268,72 @@ export interface Shockwave {
   color: string;
 }
 
-export type GameStage = "IDLE" | "CALIBRATING" | "ACTIVE" | "PAUSED" | "COMPLETED";
+export type CampaignStage =
+  | "PROLOGUE"
+  | "CALIBRATION_ARMS"
+  | "CALIBRATION_STANCE"
+  | "CALIBRATION_SHIELD"
+  | "BOSS_INTRO"
+  | "ACTIVE_DEFLECTION"
+  | "PAUSED"
+  | "EPILOGUE";
+
+export type GameStage = CampaignStage;
+
+export type CharacterState =
+  | "OPERATIVE_NEUTRAL"
+  | "OPERATIVE_CALIBRATING"
+  | "AI_ALERT"
+  | "OPERATIVE_EMPOWERED";
+
+export interface DialogueSlide {
+  id: number;
+  speaker: "AI_SUIT_OPERATOR" | "APEX_ANOMALY" | "SYSTEM_CORE";
+  speakerTitle: string;
+  portraitState: CharacterState;
+  dialogue: string;
+  actionLabel: string; // e.g., "NEXT >>", "COMMENCE CALIBRATION", "ENGAGE SHIELD"
+  targetStage?: CampaignStage;
+}
+
+export const STORY_SCRIPT: DialogueSlide[] = [
+  {
+    id: 1,
+    speaker: "AI_SUIT_OPERATOR",
+    speakerTitle: "TAC-COM // UNIT 07",
+    portraitState: "OPERATIVE_NEUTRAL",
+    dialogue: "Neural telemetry detected. Operative, your cybernetic kinetic conduits suffered catastrophic collapse during the breach. Motor recalibration is mandatory.",
+    actionLabel: "NEXT: INITIATE DIAGNOSTICS >>",
+    targetStage: "PROLOGUE",
+  },
+  {
+    id: 2,
+    speaker: "AI_SUIT_OPERATOR",
+    speakerTitle: "TAC-COM // CALIBRATION PROTOCOL",
+    portraitState: "OPERATIVE_CALIBRATING",
+    dialogue: "We must test the Kinetic Aegis system before environmental breach. We will run range-of-motion verification across arms, full stance, and shield generation.",
+    actionLabel: "COMMENCE CALIBRATION >>",
+    targetStage: "CALIBRATION_ARMS",
+  },
+  {
+    id: 3,
+    speaker: "SYSTEM_CORE",
+    speakerTitle: "SYSTEM CORE // APEX ALERT",
+    portraitState: "AI_ALERT",
+    dialogue: "CRITICAL WARNING: The Apex Core has located our frequency. Heavy kinetic shockwaves incoming. Drop into full depth to deflect the blast!",
+    actionLabel: "ENGAGE DEFLECTION SHIELD >>",
+    targetStage: "ACTIVE_DEFLECTION",
+  },
+  {
+    id: 4,
+    speaker: "AI_SUIT_OPERATOR",
+    speakerTitle: "TAC-COM // MISSION DEBRIEF",
+    portraitState: "OPERATIVE_EMPOWERED",
+    dialogue: "Threat neutralized. Kinetic integrity restored to 98.4%. Range of motion logs have been compiled for clinical discharge.",
+    actionLabel: "VIEW RECOVERY DOSSIER >>",
+    targetStage: "EPILOGUE",
+  },
+];
 
 export interface KineticProjectile {
   id: string;
@@ -823,9 +888,488 @@ class AudioSynth {
       // safe
     }
   }
+
+  private droneOsc1: OscillatorNode | null = null;
+  private droneOsc2: OscillatorNode | null = null;
+  private droneGain: GainNode | null = null;
+
+  startAmbientDrone() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      if (this.droneGain) return; // already running
+      const now = this.ctx.currentTime;
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(160, now);
+
+      const osc1 = this.ctx.createOscillator();
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(55, now); // A1 Sub-drone
+
+      const osc2 = this.ctx.createOscillator();
+      osc2.type = "triangle";
+      osc2.frequency.setValueAtTime(110, now); // A2 Harmonic
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.05, now + 1.2);
+
+      osc1.connect(filter);
+      osc2.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc1.start(now);
+      osc2.start(now);
+
+      this.droneOsc1 = osc1;
+      this.droneOsc2 = osc2;
+      this.droneGain = gain;
+    } catch {
+      // safe
+    }
+  }
+
+  stopAmbientDrone() {
+    try {
+      if (this.droneGain && this.ctx) {
+        const now = this.ctx.currentTime;
+        this.droneGain.gain.setValueAtTime(this.droneGain.gain.value, now);
+        this.droneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+        setTimeout(() => {
+          try {
+            this.droneOsc1?.stop();
+            this.droneOsc2?.stop();
+          } catch {}
+          this.droneOsc1 = null;
+          this.droneOsc2 = null;
+          this.droneGain = null;
+        }, 450);
+      }
+    } catch {
+      // safe
+    }
+  }
+
+  playCalibrationPing() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.setValueAtTime(1320, now + 0.05);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.22, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.16);
+    } catch {
+      // safe
+    }
+  }
+
+  playShieldOptimalChime() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const freqs = [392.0, 523.25, 659.25, 783.99, 1046.5];
+      freqs.forEach((freq, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        const start = this.ctx!.currentTime + idx * 0.055;
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.001, start);
+        gain.gain.exponentialRampToValueAtTime(0.2, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.4);
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(start);
+        osc.stop(start + 0.4);
+      });
+    } catch {
+      // safe
+    }
+  }
+
+  playBossAlarm() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.setValueAtTime(880, now + 0.12);
+      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    } catch {
+      // safe
+    }
+  }
 }
 
 const synth = new AudioSynth();
+
+// ---------------------------------------------------------------------------
+// Typewriter Text Component (Glassmorphic Terminal Effect)
+// ---------------------------------------------------------------------------
+
+function TypewriterText({
+  text,
+  speed = 25,
+  onComplete,
+  className = "",
+}: {
+  text: string;
+  speed?: number;
+  onComplete?: () => void;
+  className?: string;
+}) {
+  const [displayedText, setDisplayedText] = useState("");
+  const [isComplete, setIsComplete] = useState(false);
+
+  useEffect(() => {
+    let index = 0;
+    setDisplayedText("");
+    setIsComplete(false);
+    const interval = setInterval(() => {
+      index++;
+      if (index <= text.length) {
+        setDisplayedText(text.slice(0, index));
+      } else {
+        clearInterval(interval);
+        setIsComplete(true);
+        if (onComplete) onComplete();
+      }
+    }, speed);
+    return () => clearInterval(interval);
+  }, [text, speed, onComplete]);
+
+  return (
+    <span className={className}>
+      {displayedText}
+      {!isComplete && <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse align-middle" />}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Character Portrait Component: Procedural Sci-Fi Avatar Sprite
+// ---------------------------------------------------------------------------
+
+function CharacterPortrait({
+  state,
+  size = 120,
+  className = "",
+}: {
+  state: CharacterState;
+  size?: number;
+  className?: string;
+}) {
+  const isNeutral = state === "OPERATIVE_NEUTRAL";
+  const isCalibrating = state === "OPERATIVE_CALIBRATING";
+  const isAlert = state === "AI_ALERT";
+  const isEmpowered = state === "OPERATIVE_EMPOWERED";
+
+  const primaryColor = isAlert
+    ? "#ff0055"
+    : isEmpowered
+    ? "#10b981"
+    : isCalibrating
+    ? "#f59e0b"
+    : "#00f0ff";
+
+  const secondaryColor = isAlert
+    ? "#f43f5e"
+    : isEmpowered
+    ? "#34d399"
+    : isCalibrating
+    ? "#fbbf24"
+    : "#38bdf8";
+
+  const filterId = isAlert
+    ? "url(#glow_rose)"
+    : isEmpowered
+    ? "url(#glow_emerald)"
+    : isCalibrating
+    ? "url(#glow_amber)"
+    : "url(#glow_cyan)";
+
+  return (
+    <div
+      className={`relative flex items-center justify-center select-none ${className}`}
+      style={{ width: size, height: size }}
+    >
+      <svg
+        viewBox="0 0 120 120"
+        width={size}
+        height={size}
+        className="w-full h-full overflow-visible"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <filter id="glow_cyan" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="glow_amber" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="glow_rose" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="glow_emerald" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+
+          {/* Radial Backdrops */}
+          <radialGradient id="holoBg" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor={primaryColor} stopOpacity="0.22" />
+            <stop offset="60%" stopColor={primaryColor} stopOpacity="0.06" />
+            <stop offset="100%" stopColor="#050811" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+
+        {/* 1. Holographic Backdrop & Framing */}
+        <circle cx="60" cy="60" r="54" fill="url(#holoBg)" />
+        <circle
+          cx="60"
+          cy="60"
+          r="54"
+          fill="none"
+          stroke={primaryColor}
+          strokeWidth="1"
+          strokeDasharray="8 6"
+          opacity="0.35"
+        />
+        <circle
+          cx="60"
+          cy="60"
+          r="57"
+          fill="none"
+          stroke={primaryColor}
+          strokeWidth="0.75"
+          strokeDasharray="2 6"
+          opacity="0.25"
+        />
+
+        {/* Four High-Tech Corner Brackets */}
+        <path d="M 6 16 L 6 6 L 16 6" fill="none" stroke={primaryColor} strokeWidth="1.5" opacity="0.85" />
+        <path d="M 104 6 L 114 6 L 114 16" fill="none" stroke={primaryColor} strokeWidth="1.5" opacity="0.85" />
+        <path d="M 6 104 L 6 114 L 16 114" fill="none" stroke={primaryColor} strokeWidth="1.5" opacity="0.85" />
+        <path d="M 104 114 L 114 114 L 114 104" fill="none" stroke={primaryColor} strokeWidth="1.5" opacity="0.85" />
+
+        {/* 2. Armored Shoulder Chassis & Collar */}
+        <path
+          d="M 24 116 L 36 94 L 84 94 L 96 116 Z"
+          fill="#0a0f1d"
+          stroke={primaryColor}
+          strokeWidth="1.5"
+          opacity="0.9"
+        />
+        <path
+          d="M 42 94 L 46 84 L 74 84 L 78 94 Z"
+          fill="#070c18"
+          stroke={primaryColor}
+          strokeWidth="1.2"
+        />
+
+        {/* State Collar Conduits */}
+        {isNeutral && (
+          <>
+            <line x1="60" y1="94" x2="60" y2="114" stroke="#00f0ff" strokeWidth="1.5" opacity="0.7" />
+            <circle cx="60" cy="104" r="2.5" fill="#00f0ff" />
+          </>
+        )}
+        {isCalibrating && (
+          <>
+            <line x1="50" y1="96" x2="50" y2="114" stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="3 2" className="animate-pulse" />
+            <line x1="70" y1="96" x2="70" y2="114" stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="3 2" className="animate-pulse" />
+            <circle cx="60" cy="104" r="3" fill="#f59e0b" className="animate-ping" />
+          </>
+        )}
+        {isAlert && (
+          <>
+            <line x1="60" y1="94" x2="60" y2="114" stroke="#ff0055" strokeWidth="2.5" className="animate-pulse" filter="url(#glow_rose)" />
+            <circle cx="50" cy="104" r="2" fill="#ff0055" className="animate-ping" />
+            <circle cx="70" cy="104" r="2" fill="#ff0055" className="animate-ping" />
+          </>
+        )}
+        {isEmpowered && (
+          <>
+            <path
+              d="M 38 114 L 46 96 L 46 84 L 42 74"
+              fill="none"
+              stroke="#34d399"
+              strokeWidth="2"
+              strokeDasharray="4 2"
+              className="animate-pulse"
+              filter="url(#glow_emerald)"
+            />
+            <path
+              d="M 82 114 L 74 96 L 74 84 L 78 74"
+              fill="none"
+              stroke="#34d399"
+              strokeWidth="2"
+              strokeDasharray="4 2"
+              className="animate-pulse"
+              filter="url(#glow_emerald)"
+            />
+            <line x1="60" y1="94" x2="60" y2="114" stroke="#00ffaa" strokeWidth="2.5" className="animate-pulse" filter="url(#glow_emerald)" />
+          </>
+        )}
+
+        {/* 3. Helmet Shell & Cranium Dome */}
+        <path
+          d="M 38 52 C 38 26, 82 26, 82 52 L 84 68 L 76 84 L 60 89 L 44 84 L 36 68 Z"
+          fill="#0c1222"
+          stroke={primaryColor}
+          strokeWidth="2"
+          filter={filterId}
+        />
+
+        {/* Ear Sensor Pods */}
+        <path d="M 31 52 L 37 48 L 37 68 L 31 64 Z" fill="#080e1a" stroke={primaryColor} strokeWidth="1.2" />
+        <path d="M 89 52 L 83 48 L 83 68 L 89 64 Z" fill="#080e1a" stroke={primaryColor} strokeWidth="1.2" />
+        <circle cx="34" cy="58" r="1.5" fill={secondaryColor} />
+        <circle cx="86" cy="58" r="1.5" fill={secondaryColor} />
+
+        {/* 4. Tactical Visor Faceplate */}
+        <path
+          d="M 43 50 L 77 50 L 74 68 L 60 74 L 46 68 Z"
+          fill={isAlert ? "#2a0812" : isEmpowered ? "#04241a" : "#050914"}
+          stroke={primaryColor}
+          strokeWidth="1.8"
+        />
+
+        {/* 5. Specific State Expressions & Neural Visor Holograms */}
+        {/* OPERATIVE_NEUTRAL: Steady cyan holographic outline, calm digital eyes, static collar */}
+        {isNeutral && (
+          <g>
+            <rect x="47" y="56" width="10" height="3.5" rx="1.5" fill="#00f0ff" filter="url(#glow_cyan)" />
+            <rect x="63" y="56" width="10" height="3.5" rx="1.5" fill="#00f0ff" filter="url(#glow_cyan)" />
+            <line x1="46" y1="64" x2="74" y2="64" stroke="#00f0ff" strokeWidth="0.8" strokeDasharray="3 2" opacity="0.6" />
+            <circle cx="60" cy="58" r="1" fill="#38bdf8" />
+          </g>
+        )}
+
+        {/* OPERATIVE_CALIBRATING: Ambient gold scanning rings rotating around the visor */}
+        {isCalibrating && (
+          <g>
+            <circle
+              cx="60"
+              cy="58"
+              r="34"
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth="1.5"
+              strokeDasharray="16 12 4 12"
+              className="animate-spin"
+              style={{ transformOrigin: "60px 58px", animationDuration: "5s" }}
+              opacity="0.9"
+            />
+            <circle
+              cx="60"
+              cy="58"
+              r="27"
+              fill="none"
+              stroke="#fbbf24"
+              strokeWidth="1"
+              strokeDasharray="8 6"
+              className="animate-spin"
+              style={{ transformOrigin: "60px 58px", animationDirection: "reverse", animationDuration: "3.5s" }}
+              opacity="0.75"
+            />
+            {/* Visor Reticle Crosshair */}
+            <circle cx="60" cy="58" r="6" fill="none" stroke="#fbbf24" strokeWidth="1" />
+            <line x1="50" y1="58" x2="70" y2="58" stroke="#fbbf24" strokeWidth="0.9" strokeDasharray="2 2" />
+            <line x1="60" y1="51" x2="60" y2="65" stroke="#fbbf24" strokeWidth="0.9" strokeDasharray="2 2" />
+            <rect x="58.5" y="56.5" width="3" height="3" fill="#fbbf24" className="animate-ping" />
+            {/* Amber Laser Sweep Bar */}
+            <line x1="44" y1="54" x2="76" y2="54" stroke="#f59e0b" strokeWidth="1.5" opacity="0.8" className="animate-pulse" />
+          </g>
+        )}
+
+        {/* AI_ALERT: Sharp crimson-tinted neural visor, warning waveforms pulsing across chin piece */}
+        {isAlert && (
+          <g>
+            {/* Flashing chevrons flanking helmet */}
+            <path d="M 25 52 L 21 58 L 25 64" stroke="#ff0055" strokeWidth="2" fill="none" className="animate-ping" />
+            <path d="M 95 52 L 99 58 L 95 64" stroke="#ff0055" strokeWidth="2" fill="none" className="animate-ping" />
+            {/* Sharp Angled Crimson Ocular Lenses */}
+            <polygon points="46,55 58,58 47,62" fill="#ff0055" filter="url(#glow_rose)" />
+            <polygon points="74,55 62,58 73,62" fill="#ff0055" filter="url(#glow_rose)" />
+            {/* Warning Waveforms Across Chin Piece */}
+            <path
+              d="M 44 80 L 49 80 L 52 74 L 56 86 L 60 76 L 64 84 L 68 80 L 76 80"
+              fill="none"
+              stroke="#ff0055"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="animate-pulse"
+              filter="url(#glow_rose)"
+            />
+            {/* Pulsing Alert Chevrons on Forehead */}
+            <polygon points="56,36 60,32 64,36" fill="#ff0055" className="animate-pulse" />
+          </g>
+        )}
+
+        {/* OPERATIVE_EMPOWERED: Emerald bio-luminescent glow, active energy conduits running up suit */}
+        {isEmpowered && (
+          <g>
+            {/* Blazing Twin Diamond Ocular Optics */}
+            <polygon points="53,53 58,58 53,63 48,58" fill="#00ffaa" filter="url(#glow_emerald)" />
+            <polygon points="67,53 72,58 67,63 62,58" fill="#00ffaa" filter="url(#glow_emerald)" />
+            <circle cx="53" cy="58" r="1.5" fill="#ffffff" />
+            <circle cx="67" cy="58" r="1.5" fill="#ffffff" />
+            {/* Ascending Spark Nodes */}
+            <circle cx="46" cy="40" r="1.5" fill="#34d399" className="animate-ping" />
+            <circle cx="74" cy="40" r="1.5" fill="#34d399" className="animate-ping" />
+            <circle cx="60" cy="22" r="2" fill="#00ffaa" className="animate-pulse" filter="url(#glow_emerald)" />
+            {/* Forehead Crest Shield */}
+            <polygon points="60,30 64,36 60,42 56,36" fill="#10b981" opacity="0.8" />
+          </g>
+        )}
+
+        {/* Top-Right Holographic Online Status LED */}
+        <circle cx="106" cy="14" r="2.5" fill={primaryColor} className="animate-ping" />
+        <circle cx="106" cy="14" r="2.5" fill={primaryColor} />
+      </svg>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Main Component: AthleteMind Multi-Exercise & 3D Clinician Engine
@@ -922,11 +1466,19 @@ export default function AthleteMindPage() {
   const [clinicalBadges, setClinicalBadges] = useState<ClinicalBadge[]>(DEFAULT_CLINICAL_BADGES);
   const [adherence, setAdherence] = useState<AdherenceData>(DEFAULT_ADHERENCE);
 
-  // Phase 9: Lifecycle State Machine & Incoming Kinetic Deflection Engine
-  const [gameStage, setGameStage] = useState<GameStage>("IDLE");
-  const [calibrationCountdown, setCalibrationCountdown] = useState<number>(5);
+  // Campaign State Machine & Interactive Calibration
+  const [gameStage, setGameStage] = useState<CampaignStage>("PROLOGUE");
   const [deflectionsCompleted, setDeflectionsCompleted] = useState<number>(0);
-  const [deflectionsTarget, setDeflectionsTarget] = useState<number>(10);
+  const [deflectionsTarget, setDeflectionsTarget] = useState<number>(8);
+  const [shieldTestHoldProgress, setShieldTestHoldProgress] = useState<number>(0);
+  const [bossIntroCountdown, setBossIntroCountdown] = useState<number>(3);
+  const [armCalibrationVerified, setArmCalibrationVerified] = useState(false);
+  const [stanceCalibrationVerified, setStanceCalibrationVerified] = useState(false);
+
+  // Arcade Visual-Novel Exposition Engine State
+  const [activeDialogueId, setActiveDialogueId] = useState<number | null>(1);
+  const activeDialogueIdRef = useRef<number | null>(1);
+  const currentSlide = STORY_SCRIPT.find((s) => s.id === activeDialogueId) || null;
 
   // DOM References
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -958,17 +1510,23 @@ export default function AthleteMindPage() {
   const bioCreditsRef = useRef<number>(350);
   const isRestDayRef = useRef(false);
 
-  // Phase 9: Kinetic Deflection & State Machine Fast-Access Refs
-  const gameStageRef = useRef<GameStage>("IDLE");
+  // Fast-Access Refs for Campaign & Interactive Calibration
+  const gameStageRef = useRef<CampaignStage>("PROLOGUE");
   const projectilesRef = useRef<KineticProjectile[]>([]);
   const nextProjectileTimeRef = useRef<number>(0);
   const hitStopUntilRef = useRef<number>(0);
   const shieldBreachFlashRef = useRef<number>(0);
-  const lastCountdownSecRef = useRef<number>(-1);
-  const calibrationStartTimeRef = useRef<number>(0);
+  const calibrationGreenFlashRef = useRef<number>(0);
   const pauseStartTimeRef = useRef<number>(0);
   const totalPausedDurationRef = useRef<number>(0);
   const deflectionsCompletedRef = useRef<number>(0);
+
+  // Interactive Calibration Tracking Refs
+  const calibrationArmFramesRef = useRef<number>(0);
+  const calibrationStanceFramesRef = useRef<number>(0);
+  const calibrationShieldHoldSecRef = useRef<number>(0);
+  const bossIntroStartTimeRef = useRef<number>(0);
+  const lastBossAlarmSecRef = useRef<number>(-1);
 
   // Fast access mirrors
   const primaryAngleRef = useRef(180);
@@ -1017,6 +1575,10 @@ export default function AthleteMindPage() {
   useEffect(() => {
     deflectionsCompletedRef.current = deflectionsCompleted;
   }, [deflectionsCompleted]);
+
+  useEffect(() => {
+    activeDialogueIdRef.current = activeDialogueId;
+  }, [activeDialogueId]);
 
   // Load vault, callsign, and clinical history on mount
   useEffect(() => {
@@ -1593,27 +2155,95 @@ export default function AthleteMindPage() {
   // Lifecycle Finite State Machine & Session Controls
   // ---------------------------------------------------------------------------
 
-  const handleStartSession = useCallback(() => {
-    setGameStage("CALIBRATING");
-    gameStageRef.current = "CALIBRATING";
-    setCalibrationCountdown(5);
-    calibrationStartTimeRef.current = performance.now();
-    lastCountdownSecRef.current = -1;
+  // ---------------------------------------------------------------------------
+  // Campaign State Machine & Interactive Calibration Controls
+  // ---------------------------------------------------------------------------
+
+  const handleStartCampaign = useCallback(() => {
+    synth.stopAmbientDrone();
+    synth.playCalibrationPing();
+    setActiveDialogueId(null);
+    activeDialogueIdRef.current = null;
+    setGameStage("CALIBRATION_ARMS");
+    gameStageRef.current = "CALIBRATION_ARMS";
+    calibrationArmFramesRef.current = 0;
+    calibrationStanceFramesRef.current = 0;
+    calibrationShieldHoldSecRef.current = 0;
+    deflectionsCompletedRef.current = 0;
+    setDeflectionsCompleted(0);
     projectilesRef.current = [];
     nextProjectileTimeRef.current = 0;
-    totalPausedDurationRef.current = 0;
-    setDeflectionsCompleted(0);
-    deflectionsCompletedRef.current = 0;
-    synth.playCalibrationBeep(false);
-    speakCoachCue("Calibration countdown initiated. Step into frame.");
+    speakCoachCue("Motor synchronization initialized. Raise both hands above shoulders to calibrate range.");
 
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "CALIBRATING" }));
+      socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "CALIBRATION_ARMS" }));
     }
   }, [speakCoachCue]);
 
+  // Arcade Visual-Novel Exposition Engine Handlers
+  const handleAdvanceDialogue = useCallback(() => {
+    if (activeDialogueIdRef.current === null) return;
+    synth.playCalibrationPing();
+
+    const currentId = activeDialogueIdRef.current;
+    if (currentId === 1) {
+      // Scene 1 (Awakening) -> Scene 2 (Calibration Briefing)
+      setActiveDialogueId(2);
+      activeDialogueIdRef.current = 2;
+      speakCoachCue("Calibration briefing. Range of motion verification across arms, full stance, and shield generation.");
+    } else if (currentId === 2) {
+      // Scene 2 -> Start Arm Calibration
+      setActiveDialogueId(null);
+      activeDialogueIdRef.current = null;
+      handleStartCampaign();
+    } else if (currentId === 3) {
+      // Scene 3 (Pre-Battle Confrontation) -> Active Deflection Combat
+      setActiveDialogueId(null);
+      activeDialogueIdRef.current = null;
+      setGameStage("ACTIVE_DEFLECTION");
+      gameStageRef.current = "ACTIVE_DEFLECTION";
+      nextProjectileTimeRef.current = performance.now() + 1500;
+      synth.playShieldOptimalChime();
+      speakCoachCue("Engage deflection shield! Deflect incoming shockwaves!");
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "ACTIVE_DEFLECTION" }));
+      }
+    } else if (currentId === 4) {
+      // Scene 4 (Victory Resolution) -> Open Clinical Recovery Dossier
+      setActiveDialogueId(null);
+      activeDialogueIdRef.current = null;
+      setShowProgressModal(true);
+      speakCoachCue("Opening clinical recovery dossier.");
+    }
+  }, [handleStartCampaign, speakCoachCue]);
+
+  const handleSkipDialogue = useCallback(() => {
+    if (activeDialogueIdRef.current === null) return;
+    synth.playCalibrationPing();
+    const currentId = activeDialogueIdRef.current;
+
+    if (currentId === 1 || currentId === 2) {
+      setActiveDialogueId(null);
+      activeDialogueIdRef.current = null;
+      handleStartCampaign();
+    } else if (currentId === 3) {
+      setActiveDialogueId(null);
+      activeDialogueIdRef.current = null;
+      setGameStage("ACTIVE_DEFLECTION");
+      gameStageRef.current = "ACTIVE_DEFLECTION";
+      nextProjectileTimeRef.current = performance.now() + 1500;
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "ACTIVE_DEFLECTION" }));
+      }
+    } else if (currentId === 4) {
+      setActiveDialogueId(null);
+      activeDialogueIdRef.current = null;
+      setShowProgressModal(true);
+    }
+  }, [handleStartCampaign]);
+
   const handleTogglePause = useCallback(() => {
-    if (gameStageRef.current === "ACTIVE") {
+    if (gameStageRef.current === "ACTIVE_DEFLECTION") {
       setGameStage("PAUSED");
       gameStageRef.current = "PAUSED";
       pauseStartTimeRef.current = performance.now();
@@ -1635,67 +2265,93 @@ export default function AthleteMindPage() {
         }
         pauseStartTimeRef.current = 0;
       }
-      setGameStage("ACTIVE");
-      gameStageRef.current = "ACTIVE";
-      synth.playCalibrationBeep(true);
+      setGameStage("ACTIVE_DEFLECTION");
+      gameStageRef.current = "ACTIVE_DEFLECTION";
+      synth.playCalibrationPing();
       speakCoachCue("Resuming protocol.");
 
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "ACTIVE" }));
+        socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "ACTIVE_DEFLECTION" }));
       }
     }
   }, [speakCoachCue]);
 
   const handleAbortSession = useCallback(() => {
-    setGameStage("COMPLETED");
-    gameStageRef.current = "COMPLETED";
+    setGameStage("EPILOGUE");
+    gameStageRef.current = "EPILOGUE";
     recordSessionAndEvaluateBadges();
     setShowProgressModal(true);
-    speakCoachCue("Session completed. Viewing recovery telemetry.");
+    speakCoachCue("Simulation suspended. Viewing recovery telemetry.");
 
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "COMPLETED" }));
+      socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "EPILOGUE" }));
     }
   }, [recordSessionAndEvaluateBadges, speakCoachCue]);
 
-  const handleRestartSession = useCallback(() => {
+  const handleRestartCampaign = useCallback(() => {
     handleResetCombat();
-    handleStartSession();
-  }, [handleResetCombat, handleStartSession]);
+    deflectionsCompletedRef.current = 0;
+    setDeflectionsCompleted(0);
+    projectilesRef.current = [];
+    nextProjectileTimeRef.current = 0;
+    setActiveDialogueId(3);
+    activeDialogueIdRef.current = 3;
+    setGameStage("BOSS_INTRO");
+    gameStageRef.current = "BOSS_INTRO";
+    bossIntroStartTimeRef.current = performance.now();
+    lastBossAlarmSecRef.current = -1;
+    speakCoachCue("Re-entering simulation. Apex Core encounter imminent.");
 
-  // Adjustment Countdown Timer (5s) before battle begins
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "BOSS_INTRO" }));
+    }
+  }, [handleResetCombat, speakCoachCue]);
+
+  // Ambient Drone for Prologue
   useEffect(() => {
-    if (gameStage !== "CALIBRATING") return;
+    if (gameStage === "PROLOGUE") {
+      synth.startAmbientDrone();
+    } else {
+      synth.stopAmbientDrone();
+    }
+    return () => synth.stopAmbientDrone();
+  }, [gameStage]);
+
+  // Boss Alert Briefing (3s Strobe Alert Countdown)
+  useEffect(() => {
+    if (gameStage !== "BOSS_INTRO" || activeDialogueId === 3) return;
+    synth.playBossAlarm();
+    bossIntroStartTimeRef.current = performance.now();
+    lastBossAlarmSecRef.current = -1;
 
     const interval = setInterval(() => {
-      const elapsed = (performance.now() - calibrationStartTimeRef.current) / 1000;
-      const remaining = Math.max(0, Math.ceil(5.0 - elapsed));
+      const elapsed = (performance.now() - bossIntroStartTimeRef.current) / 1000;
+      const remaining = Math.max(0, Math.ceil(3.0 - elapsed));
+      setBossIntroCountdown(remaining);
 
-      if (remaining !== lastCountdownSecRef.current) {
-        lastCountdownSecRef.current = remaining;
-        setCalibrationCountdown(remaining);
+      if (remaining !== lastBossAlarmSecRef.current && remaining > 0) {
+        lastBossAlarmSecRef.current = remaining;
+        synth.playBossAlarm();
+      }
 
-        if (remaining > 0) {
-          synth.playCalibrationBeep(false);
-        } else {
-          // 0 -> ENGAGE!
-          synth.playCalibrationBeep(true);
-          speakCoachCue("Engage! Kinetic deflection defense active.");
-          setGameStage("ACTIVE");
-          gameStageRef.current = "ACTIVE";
-          nextProjectileTimeRef.current = performance.now() + 2500; // First kinetic projectile after 2.5s
+      if (elapsed >= 3.0) {
+        clearInterval(interval);
+        setGameStage("ACTIVE_DEFLECTION");
+        gameStageRef.current = "ACTIVE_DEFLECTION";
+        nextProjectileTimeRef.current = performance.now() + 2000;
+        synth.playShieldOptimalChime();
+        speakCoachCue("Engage! Deflect all incoming kinetic orbs!");
 
-          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "ACTIVE" }));
-          }
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "ACTIVE_DEFLECTION" }));
         }
       }
     }, 80);
 
     return () => clearInterval(interval);
-  }, [gameStage, speakCoachCue]);
+  }, [gameStage, activeDialogueId, speakCoachCue]);
 
-  // Global Keyboard Listener for Spacebar and Escape (Pause / Resume / Start)
+  // Global Keyboard Listener for Spacebar and Escape (Pause / Resume / Start / Dialogue)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space" || e.key === " " || e.key === "Escape") {
@@ -1703,20 +2359,33 @@ export default function AthleteMindPage() {
         if (e.code === "Space" || e.key === " ") {
           e.preventDefault();
         }
-        if (gameStageRef.current === "ACTIVE" || gameStageRef.current === "PAUSED") {
+
+        // Advance or skip dialogue if active
+        if (activeDialogueIdRef.current !== null) {
+          if (e.code === "Space" || e.key === " ") {
+            handleAdvanceDialogue();
+            return;
+          }
+          if (e.key === "Escape") {
+            handleSkipDialogue();
+            return;
+          }
+        }
+
+        if (gameStageRef.current === "ACTIVE_DEFLECTION" || gameStageRef.current === "PAUSED") {
           handleTogglePause();
-        } else if (gameStageRef.current === "IDLE") {
-          handleStartSession();
+        } else if (gameStageRef.current === "PROLOGUE") {
+          handleStartCampaign();
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleTogglePause, handleStartSession]);
+  }, [handleTogglePause, handleStartCampaign, handleAdvanceDialogue, handleSkipDialogue]);
 
   // Boss Attack & Overheat Timer
   useEffect(() => {
-    if (matchStatus !== "ACTIVE" || gameStage !== "ACTIVE") return;
+    if (matchStatus !== "ACTIVE" || gameStage !== "ACTIVE_DEFLECTION") return;
 
     const interval = setInterval(() => {
       setStunTimer((prevStun) => {
@@ -1813,17 +2482,21 @@ export default function AthleteMindPage() {
     }
   }, [bossHp, playerHp, matchStatus, formPurity, speakCoachCue, updateVault, fetchLeaderboard, recordSessionAndEvaluateBadges]);
 
-  // Phase 9: Kinetic Deflection Drill Completion Detection
+  // Campaign Mission Completion Detection (8/8 Deflections)
   useEffect(() => {
-    if (deflectionsCompleted >= deflectionsTarget && gameStage === "ACTIVE") {
-      setGameStage("COMPLETED");
-      gameStageRef.current = "COMPLETED";
+    if (deflectionsCompleted >= deflectionsTarget && gameStage === "ACTIVE_DEFLECTION") {
+      setGameStage("EPILOGUE");
+      gameStageRef.current = "EPILOGUE";
+      setActiveDialogueId(4);
+      activeDialogueIdRef.current = 4;
       synth.playVictory();
-      speakCoachCue("Deflection protocol completed! Outstanding biomechanical stability!");
+      synth.playHarmonicChord();
+      speakCoachCue("Threat purified! Neural alignment restored. Mission accomplished!");
       recordSessionAndEvaluateBadges();
-      setTimeout(() => {
-        setShowProgressModal(true);
-      }, 1000);
+
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "EPILOGUE" }));
+      }
     }
   }, [deflectionsCompleted, deflectionsTarget, gameStage, speakCoachCue, recordSessionAndEvaluateBadges]);
 
@@ -1837,6 +2510,13 @@ export default function AthleteMindPage() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
+    if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+    }
 
     const width = canvas.width;
     const height = canvas.height;
@@ -2234,6 +2914,130 @@ export default function AthleteMindPage() {
         ctx.fillText("⬡ KINETIC SHIELD ENGAGED", pComX, pComY - hexRadius - 10);
         ctx.restore();
       }
+
+      // -----------------------------------------------------------------------
+      // Interactive Campaign Calibration Verification Loops
+      // -----------------------------------------------------------------------
+      if (gameStageRef.current === "CALIBRATION_ARMS") {
+        if (lWr && rWr && lSh && rSh) {
+          const lUp = lWr.y < lSh.y;
+          const rUp = rWr.y < rSh.y;
+          setArmCalibrationVerified(lUp && rUp);
+
+          // Draw targeting halos on wrists
+          [lWr, rWr].forEach((wr, i) => {
+            const up = i === 0 ? lUp : rUp;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(wr.x, wr.y, 24, 0, Math.PI * 2);
+            ctx.strokeStyle = up ? "#10b981" : "#00f0ff";
+            ctx.lineWidth = 3;
+            ctx.shadowColor = up ? "#10b981" : "#00f0ff";
+            ctx.shadowBlur = 16;
+            ctx.stroke();
+            ctx.fillStyle = up ? "rgba(16,185,129,0.3)" : "rgba(0,240,255,0.15)";
+            ctx.fill();
+            ctx.restore();
+          });
+
+          if (lUp && rUp) {
+            calibrationArmFramesRef.current += 1;
+            if (calibrationArmFramesRef.current >= 4) {
+              synth.playCalibrationPing();
+              spawnParticles(lWr.x, lWr.y, 22, "#10b981");
+              spawnParticles(rWr.x, rWr.y, 22, "#10b981");
+              spawnFloatingText("ARM RANGE VERIFIED", width / 2, height * 0.35, "#10b981", 32);
+              setGameStage("CALIBRATION_STANCE");
+              gameStageRef.current = "CALIBRATION_STANCE";
+              calibrationArmFramesRef.current = 0;
+              speakCoachCue("Arm range verified. Step back until hips and ankles are visible.");
+              if (socketRef.current?.readyState === WebSocket.OPEN) {
+                socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "CALIBRATION_STANCE" }));
+              }
+            }
+          } else {
+            calibrationArmFramesRef.current = 0;
+          }
+        }
+      } else if (gameStageRef.current === "CALIBRATION_STANCE") {
+        const hasHips = Boolean(lHip && rHip);
+        const hasAnkles = Boolean(lAnk && rAnk);
+        const visibleHipsAndAnkles = hasHips && hasAnkles;
+        setStanceCalibrationVerified(visibleHipsAndAnkles);
+
+        if (visibleHipsAndAnkles) {
+          calibrationStanceFramesRef.current += 1;
+          if (calibrationStanceFramesRef.current >= 6) {
+            calibrationGreenFlashRef.current = performance.now() + 500;
+            synth.playCalibrationPing();
+            spawnParticles(width / 2, height / 2, 40, "#10b981");
+            spawnFloatingText("FULL BODY FRAMED", width / 2, height * 0.35, "#10b981", 32);
+            setGameStage("CALIBRATION_SHIELD");
+            gameStageRef.current = "CALIBRATION_SHIELD";
+            calibrationStanceFramesRef.current = 0;
+            speakCoachCue("Full body framed. Test squat shield: lower to 90 degrees and hold for 1.5 seconds.");
+            if (socketRef.current?.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "CALIBRATION_SHIELD" }));
+            }
+          }
+        } else {
+          calibrationStanceFramesRef.current = 0;
+        }
+      } else if (gameStageRef.current === "CALIBRATION_SHIELD") {
+        const pAng = primaryAngleRef.current;
+        const isSquatDepth = pAng <= 100 || profileMetricValue >= 28;
+        if (isSquatDepth) {
+          calibrationShieldHoldSecRef.current += 0.025;
+          const progress = Math.min(1.0, calibrationShieldHoldSecRef.current / 1.5);
+          setShieldTestHoldProgress(progress);
+
+          // Force draw charging gold hexagonal shield
+          const hexRadius = pPerimeterRadius + 18;
+          ctx.save();
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+            const angle = (Math.PI / 3) * i - Math.PI / 6;
+            const hx = pComX + hexRadius * Math.cos(angle);
+            const hy = pComY + hexRadius * Math.sin(angle);
+            if (i === 0) ctx.moveTo(hx, hy);
+            else ctx.lineTo(hx, hy);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = "#ffd700";
+          ctx.lineWidth = 4.0;
+          ctx.shadowColor = "#ffd700";
+          ctx.shadowBlur = 24;
+          ctx.stroke();
+          ctx.fillStyle = `rgba(255, 215, 0, ${0.12 + progress * 0.3})`;
+          ctx.fill();
+
+          ctx.fillStyle = "#ffd700";
+          ctx.font = "bold 12px monospace";
+          ctx.textAlign = "center";
+          ctx.fillText(`⬡ SHIELD CHARGING: ${Math.round(progress * 100)}%`, pComX, pComY - hexRadius - 12);
+          ctx.restore();
+
+          if (calibrationShieldHoldSecRef.current >= 1.5) {
+            synth.playShieldOptimalChime();
+            spawnParticles(pComX, pComY, 50, "#ffd700");
+            spawnFloatingText("SHIELD SYSTEMS OPTIMAL!", pComX, pComY - 45, "#ffd700", 36);
+            setActiveDialogueId(3);
+            activeDialogueIdRef.current = 3;
+            setGameStage("BOSS_INTRO");
+            gameStageRef.current = "BOSS_INTRO";
+            bossIntroStartTimeRef.current = performance.now();
+            calibrationShieldHoldSecRef.current = 0;
+            setShieldTestHoldProgress(1.0);
+            speakCoachCue("Shield systems optimal. Critical alert: Apex Core approaching.");
+            if (socketRef.current?.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "BOSS_INTRO" }));
+            }
+          }
+        } else {
+          calibrationShieldHoldSecRef.current = Math.max(0, calibrationShieldHoldSecRef.current - 0.05);
+          setShieldTestHoldProgress(Math.min(1.0, calibrationShieldHoldSecRef.current / 1.5));
+        }
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -2245,7 +3049,7 @@ export default function AthleteMindPage() {
     const comY = height * 0.55;
     const perimeterRadius = 80;
 
-    if (gameStageRef.current === "ACTIVE") {
+    if (gameStageRef.current === "ACTIVE_DEFLECTION") {
       if (nextProjectileTimeRef.current === 0) {
         nextProjectileTimeRef.current = nowMs + 2000;
       } else if (nowMs >= nextProjectileTimeRef.current && !isHitStopActive) {
@@ -2270,7 +3074,7 @@ export default function AthleteMindPage() {
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
       if (p.status === "FLYING") {
-        if (gameStageRef.current === "ACTIVE" && !isHitStopActive) {
+        if (gameStageRef.current === "ACTIVE_DEFLECTION" && !isHitStopActive) {
           p.progress = Math.min(1.0, (nowMs - p.spawnTime) / p.duration);
         }
         const curX = p.startX + (p.targetX - p.startX) * p.progress;
@@ -2363,6 +3167,35 @@ export default function AthleteMindPage() {
       const flashAlpha = Math.max(0, (shieldBreachFlashRef.current - nowMs) / 400);
       ctx.save();
       ctx.fillStyle = `rgba(245, 158, 11, ${flashAlpha * 0.28})`;
+      ctx.restore();
+    }
+
+    // Green boundary flash on stance verification
+    if (calibrationGreenFlashRef.current > nowMs) {
+      const alpha = Math.max(0, (calibrationGreenFlashRef.current - nowMs) / 500);
+      ctx.save();
+      ctx.strokeStyle = `rgba(16, 185, 129, ${alpha * 0.9})`;
+      ctx.lineWidth = 14;
+      ctx.strokeRect(7, 7, width - 14, height - 14);
+      ctx.restore();
+    }
+
+    // Red emergency strobe during BOSS_INTRO
+    if (gameStageRef.current === "BOSS_INTRO") {
+      const strobe = Math.sin(nowMs * 0.018) > 0;
+      if (strobe) {
+        ctx.save();
+        ctx.fillStyle = "rgba(225, 29, 72, 0.18)";
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      }
+    }
+
+    // Cyan epilogue radiant glow
+    if (gameStageRef.current === "EPILOGUE") {
+      const glowAlpha = 0.12 + 0.05 * Math.sin(nowMs * 0.004);
+      ctx.save();
+      ctx.fillStyle = `rgba(0, 240, 255, ${glowAlpha})`;
       ctx.fillRect(0, 0, width, height);
       ctx.restore();
     }
@@ -2945,274 +3778,82 @@ export default function AthleteMindPage() {
       <video ref={videoRef} className="hidden" playsInline muted autoPlay />
 
       {/* ------------------------------------------------------------------- */}
-      {/* 1. TOP BAR: DUAL COMBAT HUD, VAULT & LEADERBOARD CONTROLS           */}
+      {/* 1. ULTRA-MINIMAL TOP BAR: STATUS CALLOUT & PAUSE CONTROLS           */}
       {/* ------------------------------------------------------------------- */}
-      {(() => {
-        const theme = THEME_STYLES[vault.activeTheme] || THEME_STYLES.cyan;
-        return (
-          <header className={`relative z-20 flex items-center justify-between px-5 py-2.5 bg-[#0a0f1d]/95 border-b ${theme.headerBorder} backdrop-blur-md`}>
-            {/* Left: Pilot HP & Overheat */}
-            <div className="flex items-center gap-3 w-64">
-              <div className={`w-9 h-9 rounded-xl ${theme.badgeBg} flex items-center justify-center text-base ${theme.glowClass}`}>
-                🛡️
-              </div>
-              <div className="flex-1">
-                <div className={`flex justify-between text-xs font-bold tracking-wider ${theme.primaryText} mb-1`}>
-                  <span>PILOT HP</span>
-                  <span>{playerHp} / 100</span>
-                </div>
-                <div className="h-2.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-cyan-500/30 mb-1">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      playerHp > 40
-                        ? "bg-gradient-to-r from-cyan-500 to-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
-                        : "bg-gradient-to-r from-rose-600 to-amber-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.7)]"
-                    }`}
-                    style={{ width: `${Math.max(0, Math.min(100, playerHp))}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[9px] text-slate-400">
-                  <span>OVERHEAT</span>
-                  <span>{stunTimer > 0 ? `STUNNED (${stunTimer.toFixed(1)}s)` : `${Math.round(overheatMeter)}%`}</span>
-                </div>
-              </div>
+      <header className="relative z-30 flex items-center justify-between px-6 py-2.5 bg-[#080d1a]/85 border-b border-slate-800/80 backdrop-blur-md h-14">
+        {/* Left: Pilot Status Callout */}
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-sm shadow-[0_0_10px_rgba(6,182,212,0.3)]">
+            🛡️
+          </div>
+          <div className="hidden sm:flex flex-col text-left font-mono">
+            <span className="text-xs font-black tracking-widest text-cyan-300">ATHLETEMIND</span>
+            <span className="text-[10px] text-slate-400 font-bold tracking-wider">
+              PILOT HP: <span className={playerHp > 30 ? "text-emerald-400" : "text-rose-400 animate-pulse"}>{playerHp}%</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Center: Large High-Contrast Status Callout */}
+        <div className="flex items-center justify-center">
+          <div className="text-center font-mono">
+            <div className="text-base sm:text-xl font-black text-cyan-300 tracking-widest uppercase animate-pulse flex items-center gap-2">
+              <span>
+                {gameStage === "PAUSED"
+                  ? "⏸️ MOTOR SYNC PAUSED"
+                  : gameStage === "PROLOGUE"
+                  ? "TACTICAL BRIEFING // AEGIS OFFLINE"
+                  : gameStage === "CALIBRATION_ARMS"
+                  ? (armCalibrationVerified ? "ARMS VERIFIED // SYNCING" : "CALIBRATING ARMS: RAISE TO SIDES")
+                  : gameStage === "CALIBRATION_STANCE"
+                  ? (stanceCalibrationVerified ? "STANCE VERIFIED // SYNCING" : "CALIBRATING STANCE: STAND TALL")
+                  : gameStage === "CALIBRATION_SHIELD"
+                  ? `CHARGING SHIELD: ${Math.round(shieldTestHoldProgress * 100)}%`
+                  : gameStage === "BOSS_INTRO"
+                  ? `⚠️ COLOSSUS SPAWN IN ${bossIntroCountdown}s`
+                  : gameStage === "EPILOGUE"
+                  ? "MISSION COMPLETED // PURITY RESTORED"
+                  : incomingAttack
+                  ? "⚠️ INCOMING BOSS STRIKE — PARRY!"
+                  : combatBanner || "HOLD SQUAT DEPTH"}
+              </span>
             </div>
+          </div>
+        </div>
 
-            {/* Center: Live Telemetry */}
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className={`text-center px-3 py-1 rounded-xl bg-black/60 border ${theme.hudBorder} ${theme.glowClass}`}>
-                <div className={`text-[9px] ${theme.primaryText} font-semibold tracking-widest uppercase`}>Reps</div>
-                <div className={`text-2xl font-black ${theme.primaryText} font-mono tracking-tight`}>
-                  {repCount.toString().padStart(2, "0")}
-                </div>
-              </div>
-
-              <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-cyan-500/30">
-                <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">Purity</div>
-                <div className={`text-xl font-black ${purityColor} tracking-tight`}>
-                  {formPurity}%
-                </div>
-              </div>
-
-              {/* Kinetic Combo Multiplier Badge */}
-              <div
-                className={`text-center px-3 py-1 rounded-xl border transition-all duration-300 ${
-                  comboMultiplier >= 3.0
-                    ? "bg-gradient-to-b from-rose-950/90 to-amber-950/90 border-amber-400 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.8)] animate-pulse"
-                    : comboMultiplier >= 2.0
-                    ? "bg-purple-950/80 border-fuchsia-400 text-fuchsia-300 shadow-[0_0_15px_rgba(217,70,239,0.5)]"
-                    : comboMultiplier >= 1.5
-                    ? "bg-amber-950/80 border-amber-500 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
-                    : "bg-black/60 border-slate-700/50 text-slate-400"
-                }`}
-              >
-                <div className="text-[9px] uppercase font-semibold tracking-widest flex items-center justify-center gap-1">
-                  <span>Streak</span>
-                  <span className="text-white font-mono font-bold">[{comboStreak}]</span>
-                </div>
-                <div className="text-sm font-black font-mono tracking-wider">
-                  {comboMultiplier >= 3.0
-                    ? "x3.0 HYPER"
-                    : comboMultiplier >= 2.0
-                    ? "x2.0 SURGE"
-                    : comboMultiplier >= 1.5
-                    ? "x1.5 COMBAT"
-                    : "x1.0 BASE"}
-                </div>
-              </div>
-
-              <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-slate-700/50">
-                <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">
-                  {primaryAngleName} / {secondaryAngleName}
-                </div>
-                <div className="text-sm font-bold text-slate-200 tracking-tight font-mono">
-                  {primaryAngle}° / {secondaryAngle}°
-                </div>
-              </div>
-
-              {/* Kinetic Deflection Metric Chip */}
-              <div
-                className={`text-center px-3 py-1 rounded-xl bg-black/60 border transition-all duration-300 ${
-                  gameStage === "ACTIVE"
-                    ? "border-cyan-400 shadow-[0_0_12px_rgba(0,240,255,0.4)]"
-                    : gameStage === "PAUSED"
-                    ? "border-amber-400"
-                    : "border-slate-700/60"
-                }`}
-              >
-                <div className="text-[9px] text-cyan-400 font-semibold tracking-widest uppercase flex items-center justify-center gap-1">
-                  <span>DEFLECTED</span>
-                </div>
-                <div className="text-sm font-black font-mono tracking-tight text-white flex items-center justify-center gap-1">
-                  <span className="text-cyan-400">🛡️</span>
-                  <span>{deflectionsCompleted} / {deflectionsTarget}</span>
-                </div>
-              </div>
-
-              <div
-                className={`text-center px-3 py-1 rounded-xl bg-black/60 border ${
-                  incomingAttack
-                    ? "border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)] animate-pulse"
-                    : isEnraged
-                    ? "border-rose-500/60"
-                    : "border-rose-500/40"
-                }`}
-              >
-                <div className="text-[9px] text-rose-400 font-semibold tracking-widest uppercase">
-                  {incomingAttack ? "PARRY ALERT" : isEnraged ? "Enraged Cycle" : "Boss Strike"}
-                </div>
-                <div
-                  className={`text-base font-black font-mono tracking-tight ${
-                    incomingAttack
-                      ? "text-rose-400 animate-bounce"
-                      : bossAttackTimer <= 3.0
-                      ? "text-rose-400 animate-ping"
-                      : "text-amber-300"
-                  }`}
-                >
-                  {incomingAttack ? `PARRY: ${parryWindowSec.toFixed(1)}s` : `${bossAttackTimer.toFixed(1)}s`}
-                </div>
-              </div>
-            </div>
-
-            {/* Right: Boss HP & Navigation Badges */}
-            <div className="flex items-center gap-2.5 justify-end">
-              {/* Primary Session State Control Button */}
-              <button
-                onClick={() => {
-                  if (gameStage === "ACTIVE" || gameStage === "PAUSED") {
-                    handleTogglePause();
-                  } else if (gameStage === "IDLE") {
-                    handleStartSession();
-                  } else if (gameStage === "COMPLETED") {
-                    handleRestartSession();
-                  }
-                }}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-lg ${
-                  gameStage === "ACTIVE"
-                    ? "bg-amber-950/80 hover:bg-amber-900 border-amber-500/60 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.3)]"
-                    : gameStage === "PAUSED"
-                    ? "bg-cyan-500 hover:bg-cyan-400 border-cyan-400 text-black font-black animate-pulse shadow-[0_0_15px_rgba(0,240,255,0.6)]"
-                    : gameStage === "CALIBRATING"
-                    ? "bg-slate-900 border-cyan-400 text-cyan-300 cursor-wait"
-                    : "bg-emerald-500 hover:bg-emerald-400 border-emerald-400 text-black font-black shadow-[0_0_15px_rgba(16,185,129,0.5)]"
-                }`}
-                title="Session State Machine Control (Spacebar / Escape)"
-              >
-                <span>
-                  {gameStage === "ACTIVE"
-                    ? "⏸️ PAUSE"
-                    : gameStage === "PAUSED"
-                    ? "▶️ RESUME"
-                    : gameStage === "CALIBRATING"
-                    ? "⏳ 5S..."
-                    : "▶️ START"}
-                </span>
-              </button>
-              <div className="w-48 text-right hidden lg:block">
-                <div className="flex justify-between text-[11px] font-bold tracking-wider mb-1">
-                  <span className={isEnraged ? "text-rose-500 animate-pulse font-black flex items-center justify-end gap-1" : "text-violet-400"}>
-                    {isEnraged ? (
-                      <>
-                        <span className="text-amber-400">🔥</span>
-                        <span>OVERCLOCKED</span>
-                      </>
-                    ) : (
-                      "COLOSSUS"
-                    )}
-                  </span>
-                  <span className="text-rose-300 font-mono">{bossHp} / {bossMaxHp}</span>
-                </div>
-                <div
-                  className={`h-2 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border mb-1 ${
-                    isEnraged ? "border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.7)]" : "border-rose-500/40"
-                  }`}
-                >
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      isEnraged
-                        ? "bg-gradient-to-r from-red-600 via-rose-500 to-amber-400 animate-pulse shadow-[0_0_15px_rgba(244,63,94,0.9)]"
-                        : "bg-gradient-to-r from-violet-600 to-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.6)]"
-                    }`}
-                    style={{ width: `${Math.max(0, Math.min(100, (bossHp / bossMaxHp) * 100))}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Bio-Restoration Credits Indicator */}
-              <div
-                className="px-2.5 py-1.5 rounded-xl bg-cyan-950/70 border border-cyan-500/50 text-xs font-black text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.3)] flex items-center gap-1.5"
-                title="Bio-Restoration Credits (Earned via Controlled Movement & Milestones)"
-              >
-                <span>💎</span>
-                <span>{bioCredits} CREDITS</span>
-              </div>
-
-              {/* Energy Cores Indicator */}
-              <button
-                onClick={() => setShowVaultModal(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-amber-950/70 hover:bg-amber-900/90 border border-amber-500/50 text-xs font-black text-amber-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(245,158,11,0.3)] flex items-center gap-1.5"
-                title="Cosmetic Loadout Vault"
-              >
-                <span>⚡</span>
-                <span>{vault.energyCores} CORES</span>
-              </button>
-
-              {/* Clinical Rest-Day Toggle */}
-              <button
-                onClick={handleToggleRestDay}
-                className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  isRestDay
-                    ? "bg-emerald-950/90 border-emerald-400 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse"
-                    : "bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-400"
-                }`}
-                title="Toggle Clinical Rest Day (Locks combat hazards, preserves streak)"
-              >
-                <span>{isRestDay ? "🌿 REST ON" : "🌿 REST OFF"}</span>
-              </button>
-
-              {/* Recovery Trajectory Modal Button */}
-              <button
-                onClick={() => setShowProgressModal(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-teal-950/80 hover:bg-teal-900 border border-teal-500/60 text-xs font-bold text-teal-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(20,184,166,0.4)] flex items-center gap-1.5"
-                title="Open Dedicated Recovery Trajectory & Day 1 Comparison"
-              >
-                <span>📈 RECOVERY</span>
-              </button>
-
-              {/* Armory Vault Button */}
-              <button
-                onClick={() => setShowVaultModal(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900/90 border border-purple-500/50 text-xs font-bold text-purple-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.3)] flex items-center gap-1.5"
-                title="Open Armory Vault"
-              >
-                <span>🛡️ ARMORY</span>
-              </button>
-
-              {/* Leaderboard Button */}
-              <button
-                onClick={() => {
-                  fetchLeaderboard();
-                  setShowLeaderboardModal(true);
-                }}
-                className="px-2.5 py-1.5 rounded-xl bg-cyan-950/70 hover:bg-cyan-900/90 border border-cyan-500/50 text-xs font-bold text-cyan-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.3)] flex items-center gap-1.5"
-                title="Global Bounty Leaderboard"
-              >
-                <span>🏆 LADDER</span>
-              </button>
-
-              {/* Debrief Modal Button */}
-              <button
-                onClick={() => setShowClinicianModal(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/50 text-xs font-bold text-emerald-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1.5"
-                title="Open Clinician Debrief"
-              >
-                <span>📊 DEBRIEF</span>
-              </button>
-            </div>
-          </header>
-        );
-      })()}
+        {/* Right: Subtle Pause / Resume Control */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              if (gameStage === "ACTIVE_DEFLECTION" || gameStage === "PAUSED") {
+                handleTogglePause();
+              } else if (gameStage === "PROLOGUE") {
+                handleStartCampaign();
+              } else if (gameStage === "EPILOGUE") {
+                handleRestartCampaign();
+              }
+            }}
+            className={`px-4 py-1.5 rounded-xl border text-xs font-mono font-black tracking-wider transition-all cursor-pointer flex items-center gap-2 shadow-lg ${
+              gameStage === "PAUSED"
+                ? "bg-cyan-500 hover:bg-cyan-400 border-cyan-400 text-black shadow-[0_0_15px_rgba(0,240,255,0.6)] animate-pulse"
+                : "bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-300 hover:text-white"
+            }`}
+            title="Toggle Pause / Resume (Spacebar)"
+          >
+            <span>
+              {gameStage === "PAUSED"
+                ? "▶ RESUME"
+                : gameStage === "ACTIVE_DEFLECTION"
+                ? "⏸ PAUSE"
+                : gameStage === "PROLOGUE"
+                ? "▶ START"
+                : gameStage === "EPILOGUE"
+                ? "🔄 RESTART"
+                : "⏸ PAUSE"}
+            </span>
+          </button>
+        </div>
+      </header>
 
       {/* Clinical Rest Day Serenity Banner */}
       {isRestDay && (
@@ -3232,150 +3873,12 @@ export default function AthleteMindPage() {
         </div>
       )}
 
-      {/* Dynamic Boss Enraged Alert Banner */}
-      {isEnraged && matchStatus === "ACTIVE" && (
-        <div className="relative z-20 w-full bg-gradient-to-r from-red-950/95 via-rose-900/95 to-red-950/95 border-b border-rose-500/60 py-1 px-4 text-center text-[11px] font-black uppercase tracking-widest text-rose-200 flex items-center justify-center gap-2 animate-pulse shadow-[0_0_20px_rgba(244,63,94,0.5)]">
-          <span className="text-amber-300 animate-ping">⚡</span>
-          <span>WARNING: SYSTEM OVERCLOCKED — BOSS ATTACK INTERVAL REDUCED TO 6.0s</span>
-          <span className="text-amber-300 animate-ping">⚡</span>
-        </div>
-      )}
-
       {/* ------------------------------------------------------------------- */}
-      {/* 2. SECONDARY CONTROLS BAR: EXERCISES, TIERS & PROTOCOL MUTATORS    */}
+      {/* 2. MAIN ARENA VIEWPORT (MAX VERTICAL HEIGHT, LATERAL HUDS)         */}
       {/* ------------------------------------------------------------------- */}
-      <div className="relative z-10 flex flex-wrap items-center justify-between px-6 py-2 bg-[#060a14]/90 border-b border-slate-800 text-xs gap-2">
-        {/* Movement Selector */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Movement:</span>
-          <div className="flex items-center bg-black/60 rounded-xl p-0.5 border border-slate-800">
-            <button
-              onClick={() => handleSelectExercise("squats")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                exercise === "squats"
-                  ? "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              🏋️ SQUAT
-            </button>
-            <button
-              onClick={() => handleSelectExercise("pushups")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                exercise === "pushups"
-                  ? "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              💪 PUSH-UP
-            </button>
-            <button
-              onClick={() => handleSelectExercise("overhead_press")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                exercise === "overhead_press"
-                  ? "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              ⚡ OVERHEAD PRESS
-            </button>
-            <button
-              onClick={() => handleSelectExercise("rdl")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                exercise === "rdl"
-                  ? "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              🎯 RDL HINGE
-            </button>
-          </div>
-        </div>
-
-        {/* Mobility Tier Selector */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Tier:</span>
-          <div className="flex items-center bg-black/60 rounded-xl p-0.5 border border-slate-800">
-            <button
-              onClick={() => handleSelectDifficulty("rehab")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                difficulty === "rehab"
-                  ? "bg-emerald-500 text-black shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                  : "text-emerald-400/70 hover:text-emerald-300"
-              }`}
-            >
-              🟢 REHAB (1.0s)
-            </button>
-            <button
-              onClick={() => handleSelectDifficulty("standard")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                difficulty === "standard"
-                  ? "bg-blue-500 text-black shadow-[0_0_10px_rgba(59,130,246,0.5)]"
-                  : "text-blue-400/70 hover:text-blue-300"
-              }`}
-            >
-              🔵 STANDARD (1.5s)
-            </button>
-            <button
-              onClick={() => handleSelectDifficulty("athlete")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                difficulty === "athlete"
-                  ? "bg-purple-500 text-black shadow-[0_0_10px_rgba(168,85,247,0.5)]"
-                  : "text-purple-400/70 hover:text-purple-300"
-              }`}
-            >
-              🟣 ATHLETE (2.0s)
-            </button>
-          </div>
-        </div>
-
-        {/* Protocol Modifiers (Mutators) */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Protocols:</span>
-          <div className="flex items-center bg-black/60 rounded-xl p-0.5 border border-slate-800 gap-1">
-            <button
-              onClick={() => handleToggleModifier("HYPER_TENSION")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                modifiers.includes("HYPER_TENSION")
-                  ? "bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.6)] animate-pulse"
-                  : "text-amber-400/70 hover:text-amber-300"
-              }`}
-              title="3.0s bottom hold required. +50% bonus critical hit damage (150 DMG)."
-            >
-              🔥 HYPER-TENSION (3s / 150 DMG)
-            </button>
-            <button
-              onClick={() => handleToggleModifier("CLINICAL_STRICT")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                modifiers.includes("CLINICAL_STRICT")
-                  ? "bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.6)]"
-                  : "text-rose-400/70 hover:text-rose-300"
-              }`}
-              title="Valgus margin shrunk to ±10%. Strict joint alignment required."
-            >
-              ⚖️ STRICT VALGUS (±10%)
-            </button>
-            <button
-              onClick={() => handleToggleModifier("ENDURANCE_GAUNTLET")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                modifiers.includes("ENDURANCE_GAUNTLET")
-                  ? "bg-purple-600 text-white shadow-[0_0_10px_rgba(147,51,234,0.6)]"
-                  : "text-purple-400/70 hover:text-purple-300"
-              }`}
-              title="Boss HP scaled to 1,000. Boss attack interval accelerated to 5.0s."
-            >
-              💀 ENDURANCE (1,000 HP / 5s)
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------------- */}
-      {/* 3. MAIN ARENA VIEWPORT                                              */}
-      {/* ------------------------------------------------------------------- */}
-      <main className="relative flex-1 w-full h-full flex items-center justify-center p-3 sm:p-4 bg-gradient-to-b from-[#050811] via-[#080d1a] to-[#04060d]">
+      <main className="relative flex-1 w-full h-[calc(100vh-3.5rem)] flex items-center justify-center p-0 bg-[#050811] overflow-hidden">
         <div
-          className={`relative w-full max-w-5xl aspect-[4/3] max-h-[78vh] rounded-3xl overflow-hidden border-2 transition-all duration-500 bg-black ${
+          className={`relative h-[92vh] max-h-[92vh] max-w-full aspect-[4/3] md:aspect-[16/9] mx-auto rounded-3xl overflow-hidden border-2 transition-all duration-500 bg-black shadow-2xl ${
             isEnraged
               ? "border-rose-500/80 shadow-[0_0_60px_rgba(244,63,94,0.4)]"
               : "border-cyan-500/30 shadow-[0_0_50px_rgba(0,240,255,0.12)]"
@@ -3383,8 +3886,8 @@ export default function AthleteMindPage() {
         >
           <canvas
             ref={canvasRef}
-            width={640}
-            height={480}
+            width={1280}
+            height={720}
             className="w-full h-full object-cover"
           />
 
@@ -3393,24 +3896,111 @@ export default function AthleteMindPage() {
             <div className="absolute inset-0 z-35 bg-rose-600/35 pointer-events-none mix-blend-screen animate-pulse backdrop-invert" />
           )}
 
-          {/* Active Evaluation Profile & Dynamic Metric Badge Inside Camera Reticle */}
-          <div className="absolute top-4 left-5 z-30 pointer-events-none flex items-center gap-2">
-            <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-black/80 border border-cyan-500/50 backdrop-blur-md shadow-[0_0_20px_rgba(0,240,255,0.25)]">
-              <span className={`w-2.5 h-2.5 rounded-full ${activeProfile === "SIDE" ? "bg-amber-400" : "bg-cyan-400"} animate-pulse shadow-[0_0_10px_currentColor]`} />
-              <div className="flex flex-col text-left">
-                <div className="text-[10px] font-black uppercase tracking-wider text-cyan-300 font-mono">
-                  {activeProfile === "SIDE" ? "MODE: SIDE PROFILE [KNEE ANGLE]" : "MODE: FRONT PROFILE [HIP DROP]"}
-                </div>
-                <div className="text-xs font-black font-mono tracking-tight text-white flex items-center gap-2">
-                  <span className="text-slate-400 text-[10px]">SIGNAL:</span>
-                  <span className={activeProfile === "SIDE" ? "text-amber-300" : "text-emerald-400"}>
-                    {activeProfile === "SIDE"
-                      ? `${Math.round(profileMetricValue || primaryAngle)}° (DEPTH <= 100°)`
-                      : `${Math.round(profileMetricValue)}% DROP (DEPTH >= 28%)`}
-                  </span>
-                </div>
+          {/* Left Lateral HUD (High-Contrast Metrics Readable from 5+ Feet Away) */}
+          <div className="absolute top-4 left-4 z-20 w-48 flex flex-col gap-3 pointer-events-auto">
+            {/* REPS */}
+            <div className="bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col">
+              <div className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1">REPS</div>
+              <div className="text-5xl font-black text-cyan-400 font-mono tracking-tight">
+                {repCount.toString().padStart(2, "0")}
               </div>
             </div>
+
+            {/* PURITY */}
+            <div className="bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col">
+              <div className="text-xs text-slate-400 font-bold uppercase mb-1">PURITY</div>
+              <div className="text-4xl font-black text-emerald-400 font-mono tracking-tight">
+                {formPurity}%
+              </div>
+            </div>
+
+            {/* STREAK */}
+            <div className="bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col">
+              <div className="text-xs text-slate-400 font-bold uppercase mb-1">STREAK</div>
+              <div className="text-3xl font-black text-amber-400 font-mono tracking-tight flex items-center gap-1.5">
+                <span>🔥</span>
+                <span>{comboStreak > 0 ? `${comboStreak}x` : "1x"}</span>
+              </div>
+            </div>
+
+            {/* DROP / DEPTH ANGLE */}
+            <div className="bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col">
+              <div className="text-xs text-slate-400 font-bold uppercase mb-1">
+                {activeProfile === "SIDE" ? "DEPTH ANGLE" : "DROP ANGLE"}
+              </div>
+              <div className="text-2xl font-bold text-white font-mono tracking-tight">
+                {activeProfile === "SIDE"
+                  ? `${Math.round(profileMetricValue || primaryAngle)}° / 90°`
+                  : `${Math.round(profileMetricValue)}% / 28%`}
+              </div>
+            </div>
+          </div>
+
+          {/* Right Lateral HUD (Deflections, Boss HP, Strike Alert, Restart) */}
+          <div className="absolute top-4 right-4 z-20 w-52 flex flex-col gap-3 text-right items-end pointer-events-auto">
+            {/* DEFLECTED */}
+            <div className="w-full bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col items-end">
+              <div className="text-xs text-slate-400 font-bold uppercase mb-1">DEFLECTED</div>
+              <div className="text-4xl font-black text-cyan-400 font-mono tracking-tight flex items-center gap-2">
+                <span className="text-2xl">🛡️</span>
+                <span>{deflectionsCompleted} / {deflectionsTarget}</span>
+              </div>
+            </div>
+
+            {/* BOSS / ANOMALY HP */}
+            <div className="w-full bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col items-end">
+              <div className="text-xs text-slate-400 font-bold uppercase mb-1 flex items-center gap-1">
+                {isEnraged && <span className="text-amber-400 animate-ping">⚡</span>}
+                <span className={isEnraged ? "text-rose-400 font-black" : "text-slate-400"}>
+                  {isEnraged ? "OVERCLOCKED" : "COLOSSUS HP"}
+                </span>
+              </div>
+              <div className="text-3xl font-black text-red-400 font-mono tracking-tight">
+                {bossHp} / {bossMaxHp}
+              </div>
+              <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-red-500/40 mt-2">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    isEnraged
+                      ? "bg-gradient-to-r from-red-600 via-rose-500 to-amber-400 animate-pulse shadow-[0_0_12px_rgba(244,63,94,0.9)]"
+                      : "bg-gradient-to-r from-violet-600 to-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.6)]"
+                  }`}
+                  style={{ width: `${Math.max(0, Math.min(100, (bossHp / bossMaxHp) * 100))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* STRIKE / PARRY ALERT */}
+            <div className={`w-full bg-slate-950/70 backdrop-blur-md border rounded-2xl p-4 shadow-xl flex flex-col items-end transition-all ${
+              incomingAttack
+                ? "border-rose-500/80 shadow-[0_0_20px_rgba(244,63,94,0.5)] animate-pulse"
+                : "border-slate-800/80"
+            }`}>
+              <div className="text-xs text-slate-400 font-bold uppercase mb-1">
+                {incomingAttack ? "PARRY ALERT" : "STRIKE IN"}
+              </div>
+              <div
+                className={`text-3xl font-black font-mono tracking-tight ${
+                  incomingAttack
+                    ? "text-rose-400 animate-bounce"
+                    : bossAttackTimer <= 3.0
+                    ? "text-rose-400 animate-pulse"
+                    : "text-amber-300"
+                }`}
+              >
+                {incomingAttack ? `PARRY: ${parryWindowSec.toFixed(1)}s` : `${bossAttackTimer.toFixed(1)}s`}
+              </div>
+            </div>
+
+            {/* RESTART BUTTON */}
+            <button
+              onClick={handleRestartCampaign}
+              className="w-full bg-slate-900/80 hover:bg-red-500/20 border border-slate-700 hover:border-red-500/50 text-sm font-mono py-2.5 px-4 rounded-xl cursor-pointer text-slate-200 hover:text-white transition-all shadow-lg flex items-center justify-center gap-2"
+              title="Restart Campaign Session"
+            >
+              <span>🔄</span>
+              <span>RESTART</span>
+            </button>
           </div>
 
           {/* Timed Evasion & Biomechanical Parry Reticle Overlay */}
@@ -3447,54 +4037,188 @@ export default function AthleteMindPage() {
           )}
 
           {/* --------------------------------------------------------------- */}
-          {/* LIFECYCLE STATE MACHINE OVERLAYS (ZERO CAMERA DESYNC)           */}
+          {/* CAMPAIGN STATE MACHINE & CALIBRATION OVERLAYS (ZERO CAMERA DESYNC) */}
           {/* --------------------------------------------------------------- */}
 
-          {/* 1. IDLE State Overlay: Protocol Initiation */}
-          {gameStage === "IDLE" && (
-            <div className="absolute inset-0 z-40 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
-              <div className="w-16 h-16 rounded-3xl bg-cyan-950/80 border-2 border-cyan-400 flex items-center justify-center text-3xl mb-4 shadow-[0_0_30px_rgba(0,240,255,0.4)] animate-pulse">
-                🛡️
+          {/* 1. PROLOGUE State: Sci-Fi Tactical Reticle Header (When Dialogue is Active) */}
+          {gameStage === "PROLOGUE" && activeDialogueId !== null && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-35 pointer-events-none text-center">
+              <div className="px-5 py-2 rounded-2xl bg-black/85 border border-cyan-500/50 backdrop-blur-md shadow-[0_0_25px_rgba(0,240,255,0.3)]">
+                <div className="text-[10px] font-black font-mono tracking-[0.3em] text-cyan-400 uppercase flex items-center justify-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                  <span>TACTICAL EXPOSITION // AEGIS RE-INITIALIZATION</span>
+                </div>
+                <div className="text-xs font-black font-mono text-white tracking-wider mt-0.5">
+                  MISSION BRIEFING: STAGE 01
+                </div>
               </div>
-              <h2 className="text-2xl sm:text-3xl font-black text-cyan-300 uppercase tracking-widest mb-2 font-mono drop-shadow-[0_0_15px_rgba(0,240,255,0.4)]">
-                KINETIC DEFLECTION PROTOCOL
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-300 max-w-md mb-6 leading-relaxed">
-                Incoming kinetic orbs target your center of mass. Lower your hips into a controlled squat (depth ≤ 100°) to project the hexagonal kinetic shield and deflect incoming projectiles.
-              </p>
-              <div className="flex flex-col sm:flex-row items-center gap-3">
+            </div>
+          )}
+
+          {/* 1b. PROLOGUE State: Standalone Sci-Fi Terminal Modal (When Dialogue is Dismissed) */}
+          {gameStage === "PROLOGUE" && activeDialogueId === null && (
+            <div className="absolute inset-0 z-40 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+              <div className="w-full max-w-xl p-8 rounded-3xl bg-[#090d19]/90 border-2 border-cyan-500/60 shadow-[0_0_50px_rgba(0,240,255,0.35)] backdrop-blur-lg flex flex-col items-center">
+                {/* Sci-Fi Terminal Header */}
+                <div className="flex items-center justify-between w-full border-b border-cyan-500/30 pb-3 mb-6">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping" />
+                    <span className="text-[11px] font-mono tracking-widest text-rose-400 font-black">
+                      TERMINAL STATUS: CRITICAL
+                    </span>
+                  </div>
+                  <div className="text-[10px] font-mono text-cyan-400 tracking-wider">
+                    NODE://ATHLETE-AEGIS-V2
+                  </div>
+                </div>
+
+                <div className="w-16 h-16 rounded-2xl bg-cyan-950/80 border border-cyan-400/80 flex items-center justify-center text-3xl mb-4 shadow-[0_0_25px_rgba(0,240,255,0.5)]">
+                  ⚡
+                </div>
+
+                <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-widest mb-4 font-mono">
+                  BIO-BOUNTY HUNTER: <span className="text-cyan-400">AEGIS PROTOCOL</span>
+                </h2>
+
+                {/* Terminal Text Container */}
+                <div className="w-full p-4 rounded-xl bg-black/70 border border-cyan-500/30 mb-6 text-left font-mono">
+                  <div className="text-[10px] text-cyan-500 uppercase tracking-widest mb-1">
+                    &gt; INCOMING TRANSMISSION:
+                  </div>
+                  <p className="text-xs sm:text-sm text-cyan-200 leading-relaxed font-mono">
+                    <TypewriterText
+                      text="SYSTEM ALERT: Neural connection severed. Kinetic Aegis Suit offline. Re-establishing motor synchronization to counter incoming biomechanical corruption..."
+                      speed={25}
+                    />
+                  </p>
+                </div>
+
+                {/* Action Button */}
                 <button
-                  onClick={handleStartSession}
-                  className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-black font-black text-xs sm:text-sm uppercase tracking-widest cursor-pointer shadow-[0_0_25px_rgba(0,240,255,0.6)] transition-all flex items-center gap-2 transform hover:scale-105"
+                  onClick={handleStartCampaign}
+                  className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-black font-black text-xs sm:text-sm uppercase tracking-widest cursor-pointer shadow-[0_0_30px_rgba(0,240,255,0.6)] transition-all flex items-center justify-center gap-2 transform hover:scale-105"
                 >
-                  <span>▶</span>
-                  <span>COMMENCE PROTOCOL (5S ADJUSTMENT)</span>
+                  <span>⚡</span>
+                  <span>INITIALIZE NEURAL SYNC</span>
                 </button>
-              </div>
-              <div className="mt-4 text-[11px] text-slate-400 font-mono">
-                Press <kbd className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-cyan-300">SPACEBAR</kbd> to initiate
-              </div>
-            </div>
-          )}
 
-          {/* 2. CALIBRATING State Overlay: 5s Adjustment Countdown */}
-          {gameStage === "CALIBRATING" && (
-            <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-none">
-              <div className="flex flex-col items-center">
-                <div className="text-xs sm:text-sm font-black text-cyan-400 uppercase tracking-[0.3em] mb-3 font-mono animate-pulse">
-                  CALIBRATING PATIENT KINEMATICS
-                </div>
-                <div className="text-8xl sm:text-9xl font-black font-mono tracking-tight text-white drop-shadow-[0_0_40px_rgba(0,240,255,0.9)] animate-ping">
-                  {calibrationCountdown > 0 ? calibrationCountdown : "ENGAGE!"}
-                </div>
-                <div className="text-xs text-slate-300 font-mono mt-6 px-5 py-2 rounded-full bg-black/80 border border-cyan-500/50 shadow-[0_0_15px_rgba(0,240,255,0.3)]">
-                  STEP INTO FRAME • ESTABLISH STABLE BASE
+                <div className="mt-4 text-[11px] text-slate-400 font-mono">
+                  Press <kbd className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-cyan-300">SPACEBAR</kbd> to initialize
                 </div>
               </div>
             </div>
           )}
 
-          {/* 3. PAUSED State Overlay: Zero Camera Desync Breather */}
+          {/* 2. CALIBRATION_ARMS: Arm Sensor Test */}
+          {gameStage === "CALIBRATION_ARMS" && (
+            <div className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-between p-6">
+              {/* Floating Prompt Banner */}
+              <div className="w-full max-w-xl px-6 py-3.5 rounded-2xl bg-black/85 border-2 border-cyan-400/80 shadow-[0_0_35px_rgba(0,240,255,0.4)] backdrop-blur-md text-center animate-pulse">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold mb-1">
+                  CALIBRATION PHASE 1/3 • ARM SENSOR TEST
+                </div>
+                <div className="text-sm sm:text-base font-black font-mono uppercase tracking-wider text-white">
+                  RAISE BOTH HANDS ABOVE SHOULDERS TO CALIBRATE RANGE
+                </div>
+              </div>
+
+              {/* Wrist Feedback Indicators */}
+              <div className="flex items-center gap-4 px-5 py-2.5 rounded-2xl bg-black/80 border border-cyan-500/40 backdrop-blur-md">
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all ${
+                  armCalibrationVerified ? "bg-emerald-950/80 border-emerald-400 text-emerald-300" : "bg-slate-900 border-slate-700 text-slate-400"
+                }`}>
+                  <span>{armCalibrationVerified ? "✅" : "⏳"}</span>
+                  <span>LEFT & RIGHT WRISTS ELEVATED</span>
+                </div>
+                <div className="text-[11px] text-cyan-400 font-mono">
+                  HOLD POSITION TO ADVANCE
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. CALIBRATION_STANCE: Full Body Framing */}
+          {gameStage === "CALIBRATION_STANCE" && (
+            <div className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-between p-6">
+              {/* Floating Prompt Banner */}
+              <div className="w-full max-w-xl px-6 py-3.5 rounded-2xl bg-black/85 border-2 border-emerald-400/80 shadow-[0_0_35px_rgba(16,185,129,0.4)] backdrop-blur-md text-center">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-1">
+                  CALIBRATION PHASE 2/3 • FULL BODY FRAMING
+                </div>
+                <div className="text-sm sm:text-base font-black font-mono uppercase tracking-wider text-white">
+                  STEP BACK UNTIL HIPS AND ANKLES ARE VISIBLE
+                </div>
+              </div>
+
+              {/* Full Body Framing Status Chips */}
+              <div className="flex items-center gap-4 px-5 py-2.5 rounded-2xl bg-black/80 border border-emerald-500/40 backdrop-blur-md">
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all ${
+                  stanceCalibrationVerified ? "bg-emerald-950/80 border-emerald-400 text-emerald-300" : "bg-slate-900 border-slate-700 text-slate-400"
+                }`}>
+                  <span>{stanceCalibrationVerified ? "✅" : "⏳"}</span>
+                  <span>HIPS & ANKLES IN FRAME</span>
+                </div>
+                <div className="text-[11px] text-emerald-400 font-mono">
+                  ALIGN LOWER BODY IN CAMERA
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 4. CALIBRATION_SHIELD: Squat Shield Activation Test */}
+          {gameStage === "CALIBRATION_SHIELD" && (
+            <div className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-between p-6">
+              {/* Floating Prompt Banner */}
+              <div className="w-full max-w-xl px-6 py-3.5 rounded-2xl bg-black/85 border-2 border-amber-400/80 shadow-[0_0_35px_rgba(245,158,11,0.4)] backdrop-blur-md text-center">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-1">
+                  CALIBRATION PHASE 3/3 • SHIELD ACTIVATION
+                </div>
+                <div className="text-sm sm:text-base font-black font-mono uppercase tracking-wider text-white">
+                  TEST SQUAT SHIELD: LOWER TO 90° AND HOLD FOR 1.5 SECONDS
+                </div>
+              </div>
+
+              {/* Shield Hold Meter */}
+              <div className="w-full max-w-md p-4 rounded-2xl bg-black/85 border border-amber-500/50 backdrop-blur-md flex flex-col items-center">
+                <div className="flex justify-between w-full text-xs font-mono font-bold text-amber-300 mb-1.5">
+                  <span>⬡ SHIELD MATRIX CHARGE</span>
+                  <span>{Math.round(shieldTestHoldProgress * 100)}%</span>
+                </div>
+                <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-amber-500/30 p-0.5 mb-2">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-75 shadow-[0_0_12px_rgba(245,158,11,0.8)]"
+                    style={{ width: `${Math.max(0, Math.min(100, shieldTestHoldProgress * 100))}%` }}
+                  />
+                </div>
+                <div className="text-[11px] font-mono text-slate-300">
+                  {shieldTestHoldProgress >= 1.0 ? "⚡ SHIELD SYSTEMS OPTIMAL!" : "LOWER HIPS & MAINTAIN DEPTH (1.5S)"}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 5. BOSS_INTRO: 3-Second Red Strobe Klaxon Alert */}
+          {gameStage === "BOSS_INTRO" && activeDialogueId === null && (
+            <div className="absolute inset-0 z-40 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center pointer-events-none">
+              <div className="w-full max-w-lg p-8 rounded-3xl bg-rose-950/80 border-2 border-rose-500 shadow-[0_0_60px_rgba(244,63,94,0.6)] backdrop-blur-md flex flex-col items-center animate-pulse">
+                <div className="text-4xl mb-3 animate-bounce">⚠️</div>
+                <div className="text-xs font-mono font-black text-amber-400 uppercase tracking-[0.3em] mb-2">
+                  CRITICAL THREAT INCOMING
+                </div>
+                <h2 className="text-xl sm:text-2xl font-black text-rose-300 uppercase tracking-widest mb-3 font-mono drop-shadow-[0_0_20px_rgba(244,63,94,0.8)]">
+                  WARNING: APEX CORE DETECTED // HIGH-MASS ORBS INCOMING
+                </h2>
+                <div className="text-7xl font-black font-mono tracking-tight text-white drop-shadow-[0_0_30px_rgba(244,63,94,0.9)] my-3">
+                  {bossIntroCountdown > 0 ? bossIntroCountdown : "ENGAGE!"}
+                </div>
+                <div className="text-xs text-rose-200 font-mono tracking-wider">
+                  PREPARE KINETIC AEGIS SHIELD • 8 ORBS INCOMING
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 6. PAUSED State: Zero Camera Desync Breather */}
           {gameStage === "PAUSED" && (
             <div className="absolute inset-0 z-40 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
               <div className="w-16 h-16 rounded-3xl bg-amber-950/80 border-2 border-amber-400 flex items-center justify-center text-3xl mb-3 shadow-[0_0_30px_rgba(245,158,11,0.4)] animate-pulse">
@@ -3526,32 +4250,159 @@ export default function AthleteMindPage() {
             </div>
           )}
 
-          {/* 4. COMPLETED State Overlay: Drill Accomplished */}
-          {gameStage === "COMPLETED" && (
-            <div className="absolute inset-0 z-40 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
-              <div className="w-16 h-16 rounded-3xl bg-teal-950/80 border-2 border-teal-400 flex items-center justify-center text-3xl mb-3 shadow-[0_0_30px_rgba(20,184,166,0.5)] animate-bounce">
-                🏆
+          {/* 7. EPILOGUE State: Victory Debrief & Recovery Dashboard */}
+          {gameStage === "EPILOGUE" && (
+            <div className="absolute inset-0 z-40 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center overflow-y-auto">
+              <div className="w-full max-w-2xl p-6 sm:p-8 rounded-3xl bg-[#09101c]/90 border-2 border-cyan-400/80 shadow-[0_0_60px_rgba(0,240,255,0.45)] backdrop-blur-lg flex flex-col items-center my-auto">
+                <div className="w-16 h-16 rounded-3xl bg-cyan-950/90 border-2 border-cyan-400 flex items-center justify-center text-3xl mb-3 shadow-[0_0_30px_rgba(0,240,255,0.6)] animate-bounce">
+                  🏆
+                </div>
+                <div className="text-xs font-mono font-black text-emerald-400 uppercase tracking-[0.3em] mb-1">
+                  CAMPAIGN STAGE COMPLETE
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black text-cyan-300 uppercase tracking-widest mb-2 font-mono drop-shadow-[0_0_20px_rgba(0,240,255,0.5)]">
+                  THREAT PURIFIED // NEURAL ALIGNMENT RESTORED
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-300 mb-6 font-mono max-w-lg leading-relaxed">
+                  All {deflectionsCompleted} of {deflectionsTarget} kinetic orbs deflected with eccentric depth and stability. Motor synchronization restored with zero biomechanical corruption.
+                </p>
+
+                {/* Recovery Trajectory Quick Summary Matrix */}
+                <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                  <div className="p-3 rounded-2xl bg-black/70 border border-cyan-500/30 text-center">
+                    <div className="text-[9px] uppercase tracking-widest text-slate-400 font-mono">Deflections</div>
+                    <div className="text-xl font-black text-cyan-300 font-mono mt-1">
+                      {deflectionsCompleted} / {deflectionsTarget}
+                    </div>
+                    <div className="text-[10px] text-emerald-400 font-mono">100% Success</div>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-black/70 border border-cyan-500/30 text-center">
+                    <div className="text-[9px] uppercase tracking-widest text-slate-400 font-mono">Peak Depth</div>
+                    <div className="text-xl font-black text-amber-300 font-mono mt-1">
+                      {minSessionAngle !== 999 ? `${minSessionAngle}°` : `${primaryAngle}°`}
+                    </div>
+                    <div className="text-[10px] text-emerald-400 font-mono">
+                      Δ {(baselineSession.avgDepthAngle - (minSessionAngle !== 999 ? minSessionAngle : primaryAngle)).toFixed(1)}° vs Day 1
+                    </div>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-black/70 border border-cyan-500/30 text-center">
+                    <div className="text-[9px] uppercase tracking-widest text-slate-400 font-mono">Form Purity</div>
+                    <div className="text-xl font-black text-emerald-400 font-mono mt-1">
+                      {formPurity}%
+                    </div>
+                    <div className="text-[10px] text-cyan-300 font-mono">
+                      {valgusCount === 0 ? "Zero Wobble" : `${valgusCount} Faults`}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-black/70 border border-cyan-500/30 text-center">
+                    <div className="text-[9px] uppercase tracking-widest text-slate-400 font-mono">Bio-Credits</div>
+                    <div className="text-xl font-black text-yellow-300 font-mono mt-1">
+                      +{deflectionsCompleted * 25} ⚡
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      Vault: {bioCredits}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    onClick={handleExportClinicalCsv}
+                    className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-widest cursor-pointer shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all flex items-center gap-2 transform hover:scale-105"
+                  >
+                    <span>📥</span>
+                    <span>DOWNLOAD TELEMETRY (.CSV)</span>
+                  </button>
+                  <button
+                    onClick={() => setShowProgressModal(true)}
+                    className="px-5 py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-black font-black text-xs uppercase tracking-widest cursor-pointer shadow-[0_0_20px_rgba(0,240,255,0.4)] transition-all flex items-center gap-2 transform hover:scale-105"
+                  >
+                    <span>📈</span>
+                    <span>RECOVERY TRAJECTORY</span>
+                  </button>
+                  <button
+                    onClick={handleRestartCampaign}
+                    className="px-5 py-3 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/50 hover:border-cyan-400 text-cyan-300 font-bold text-xs uppercase tracking-widest cursor-pointer transition-all flex items-center gap-2"
+                  >
+                    <span>🔄</span>
+                    <span>RE-ENTER SIMULATION</span>
+                  </button>
+                </div>
               </div>
-              <h2 className="text-2xl sm:text-3xl font-black text-teal-300 uppercase tracking-widest mb-2 font-mono drop-shadow-[0_0_15px_rgba(20,184,166,0.4)]">
-                DEFLECTION DRILL COMPLETED
-              </h2>
-              <p className="text-xs text-slate-300 mb-6 font-mono max-w-md leading-relaxed">
-                {deflectionsCompleted} / {deflectionsTarget} incoming kinetic orbs successfully deflected with eccentric depth and stability.
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-4">
+            </div>
+          )}
+
+          {/* --------------------------------------------------------------- */}
+          {/* 8. ARCADE VISUAL-NOVEL EXPOSITION ENGINE DIALOGUE BAR           */}
+          {/* --------------------------------------------------------------- */}
+          {activeDialogueId !== null && currentSlide && (
+            <div className="absolute bottom-3 left-3 right-3 sm:bottom-4 sm:left-4 sm:right-4 z-45 bg-slate-950/90 backdrop-blur-md border border-cyan-500/40 rounded-3xl p-4 sm:p-5 shadow-[0_0_50px_rgba(0,0,0,0.9)] flex flex-col md:flex-row items-center gap-4 sm:gap-5 transition-all">
+              {/* Left Side: 120px x 120px Character Portrait Frame */}
+              <div className="relative w-24 h-24 sm:w-[120px] sm:h-[120px] flex-shrink-0 rounded-2xl overflow-hidden bg-black/75 border-2 border-cyan-500/50 p-1 flex items-center justify-center shadow-[0_0_25px_rgba(0,240,255,0.3)]">
+                <CharacterPortrait state={currentSlide.portraitState} size={112} />
+                {/* State label badge */}
+                <div className="absolute bottom-1 right-1 text-[8px] font-mono uppercase px-1.5 py-0.5 rounded bg-black/85 border border-cyan-500/40 text-cyan-300">
+                  {currentSlide.portraitState.replace("OPERATIVE_", "")}
+                </div>
+              </div>
+
+              {/* Center: Speaker Callout Badge + Typing Text Animation */}
+              <div className="flex-1 flex flex-col items-start justify-center min-w-0 w-full text-left font-mono">
+                {/* Speaker Header */}
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span
+                    className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
+                      currentSlide.portraitState === "AI_ALERT"
+                        ? "bg-rose-950/80 border-rose-500 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse"
+                        : currentSlide.portraitState === "OPERATIVE_CALIBRATING"
+                        ? "bg-amber-950/80 border-amber-500 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.5)]"
+                        : currentSlide.portraitState === "OPERATIVE_EMPOWERED"
+                        ? "bg-emerald-950/80 border-emerald-500 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.5)]"
+                        : "bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-[0_0_12px_rgba(0,240,255,0.4)]"
+                    }`}
+                  >
+                    [ {currentSlide.speakerTitle} ]
+                  </span>
+                  <span className="text-[10px] text-slate-500 hidden sm:inline-block">
+                    SECURE://NEURAL_LINK_ACTIVE
+                  </span>
+                </div>
+
+                {/* Narrative Dialogue Body */}
+                <div className="text-xs sm:text-sm text-slate-100 font-mono leading-relaxed min-h-[3rem]">
+                  <TypewriterText
+                    key={`dialogue_${currentSlide.id}`}
+                    text={currentSlide.dialogue}
+                    speed={18}
+                    className="tracking-wide"
+                  />
+                </div>
+              </div>
+
+              {/* Right Side: High-Contrast Action Button + Skip Link */}
+              <div className="flex flex-col items-center md:items-end justify-center gap-2 flex-shrink-0 w-full md:w-auto">
                 <button
-                  onClick={() => setShowProgressModal(true)}
-                  className="px-7 py-3 rounded-2xl bg-teal-500 hover:bg-teal-400 text-black font-black text-xs uppercase tracking-widest cursor-pointer shadow-[0_0_20px_rgba(20,184,166,0.5)] transition-all flex items-center gap-2 transform hover:scale-105"
+                  onClick={handleAdvanceDialogue}
+                  className={`w-full md:w-auto px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest cursor-pointer transition-all flex items-center justify-center gap-2 transform hover:scale-105 shadow-xl ${
+                    currentSlide.portraitState === "AI_ALERT"
+                      ? "bg-rose-500 hover:bg-rose-400 text-white shadow-[0_0_25px_rgba(244,63,94,0.7)] animate-pulse"
+                      : currentSlide.portraitState === "OPERATIVE_EMPOWERED"
+                      ? "bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_25px_rgba(16,185,129,0.7)]"
+                      : currentSlide.portraitState === "OPERATIVE_CALIBRATING"
+                      ? "bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_25px_rgba(245,158,11,0.7)]"
+                      : "bg-cyan-500 hover:bg-cyan-400 text-black shadow-[0_0_25px_rgba(0,240,255,0.7)]"
+                  }`}
                 >
-                  <span>📈</span>
-                  <span>VIEW RECOVERY TRAJECTORY</span>
+                  <span>{currentSlide.actionLabel}</span>
                 </button>
+
                 <button
-                  onClick={handleRestartSession}
-                  className="px-6 py-3 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/50 hover:border-cyan-400 text-cyan-300 font-bold text-xs uppercase tracking-widest cursor-pointer transition-all flex items-center gap-2"
+                  onClick={handleSkipDialogue}
+                  className="text-[11px] font-mono text-slate-400 hover:text-cyan-300 underline underline-offset-4 cursor-pointer transition-colors"
+                  title="Skip Dialogue (Escape)"
                 >
-                  <span>🔄</span>
-                  <span>RESTART PROTOCOL</span>
+                  Skip Dialogue [ESC]
                 </button>
               </div>
             </div>
@@ -3596,34 +4447,37 @@ export default function AthleteMindPage() {
             )}
           </div>
 
-          <div className="absolute bottom-4 left-6 z-20 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 border border-slate-700">
-              <span className={`w-2 h-2 rounded-full ${cameraActive ? "bg-emerald-400" : "bg-amber-400"}`} />
-              <span>{cameraActive ? "3D SENSOR ACTIVE" : "INITIALIZING CAMERA..."}</span>
+          <div className="absolute bottom-4 left-6 z-20 flex items-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/70 border border-slate-700/80 backdrop-blur-md">
+              <span className={`w-2 h-2 rounded-full ${cameraActive ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+              <span className="text-[11px] font-mono font-semibold">{cameraActive ? "3D SENSOR ACTIVE" : "INITIALIZING CAMERA..."}</span>
             </div>
-            <div className="px-2.5 py-1 rounded-full bg-black/70 border border-cyan-500/50 text-cyan-300 text-[11px] font-bold">
-              {activeProfile === "SIDE" ? "📐 SAGITTAL (SIDE)" : "🧍 CORONAL (FRONT)"}
-            </div>
-            <div className="px-2.5 py-1 rounded-full bg-black/70 border border-amber-500/50 text-amber-300 text-[11px] font-bold">
-              {activeProfile === "SIDE" ? `KNEE: ${Math.round(profileMetricValue || primaryAngle)}°` : `DROP: ${Math.round(profileMetricValue)}%`}
-            </div>
-            <div className="px-2.5 py-1 rounded-full bg-black/60 border border-slate-700 text-slate-300 text-[11px]">
-              HOLD: {targetHoldDuration.toFixed(1)}s
+            <div className="px-2.5 py-1.5 rounded-full bg-black/70 border border-cyan-500/40 backdrop-blur-md text-cyan-300 text-[10px] font-mono font-bold">
+              {activeProfile === "SIDE" ? "SAGITTAL (SIDE)" : "CORONAL (FRONT)"}
             </div>
           </div>
 
-          <div className="absolute bottom-4 right-6 z-20 flex items-center gap-3">
+          <div className="absolute bottom-4 right-6 z-20 flex items-center gap-2">
             <button
               onClick={handleToggleMute}
-              className="px-3 py-1.5 rounded-xl bg-black/60 hover:bg-black/90 border border-slate-700 hover:border-cyan-400 text-xs text-slate-300 transition-all cursor-pointer flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-xl bg-black/70 hover:bg-black/90 border border-slate-700 hover:border-cyan-400 text-xs text-slate-300 font-mono transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
+              title="Toggle Audio Feedback"
             >
               <span>{isMuted ? "🔇 MUTED" : "🔊 COACH AUDIO"}</span>
             </button>
             <button
-              onClick={handleResetCombat}
-              className="px-3 py-1.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/40 hover:border-cyan-400 text-xs text-cyan-300 font-bold transition-all cursor-pointer flex items-center gap-1.5"
+              onClick={() => setShowClinicianModal(true)}
+              className="px-3 py-1.5 rounded-xl bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/50 hover:border-cyan-400 text-xs text-cyan-300 font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
+              title="Open Clinician Telemetry Debrief"
             >
-              <span>🔄 RESTART</span>
+              <span>📊 DEBRIEF</span>
+            </button>
+            <button
+              onClick={() => setShowVaultModal(true)}
+              className="px-3 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900 border border-purple-500/50 hover:border-purple-400 text-xs text-purple-300 font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
+              title="Open Armory Vault"
+            >
+              <span>🛡️ VAULT</span>
             </button>
           </div>
         </div>

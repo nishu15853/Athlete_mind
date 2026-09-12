@@ -1439,7 +1439,7 @@ class BossCombatEngine:
         self.telegraph_announced = False
 
     def update(self, now: float, is_holding: bool, rep_count: int, had_fault: bool, is_critical: bool) -> Dict[str, Any]:
-        if self.game_stage != "ACTIVE":
+        if self.game_stage not in ["ACTIVE", "ACTIVE_DEFLECTION"]:
             self.last_update_time = None
             return {
                 "boss_hp": self.boss_hp,
