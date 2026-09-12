@@ -2,6 +2,14 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import Script from "next/script";
+import { GiantActionBanner, BannerState } from "@/components/GiantActionBanner";
+import { MainMenu, ActiveView } from "@/components/MainMenu";
+import { CameraTestView } from "@/components/CameraTestView";
+import { TelemetryView } from "@/components/TelemetryView";
+import { ComparisonView } from "@/components/ComparisonView";
+import { AchievementsView, AchievementItem } from "@/components/AchievementsView";
+import { CircuitSelectView, CircuitMode } from "@/components/CircuitSelectView";
+import { SettingsView } from "@/components/SettingsView";
 
 // ---------------------------------------------------------------------------
 // Types & Declarations
@@ -370,6 +378,134 @@ const DEFAULT_CLINICAL_BADGES: ClinicalBadge[] = [
     icon: "🔄",
     description: "Left and right joint tracking within < 5% variance.",
     unlocked: false,
+  },
+];
+
+export const INITIAL_ACHIEVEMENTS: AchievementItem[] = [
+  {
+    id: "first_blood",
+    title: "First Blood",
+    icon: "🥉",
+    tier: "BRONZE",
+    description: "Complete your first calibrated session.",
+    category: "MILESTONE",
+    unlocked: true,
+    unlockedAt: "Aug 29, 2026",
+    currentProgress: 1,
+    maxProgress: 1,
+    progressUnit: "session",
+  },
+  {
+    id: "centurion_1",
+    title: "Centurion Tier 1",
+    icon: "🥈",
+    tier: "SILVER",
+    description: "Accumulate 50 total lifetime squats.",
+    category: "MILESTONE",
+    unlocked: false,
+    currentProgress: 48,
+    maxProgress: 50,
+    progressUnit: "squats",
+  },
+  {
+    id: "centurion_2",
+    title: "Centurion Tier 2",
+    icon: "🥇",
+    tier: "GOLD",
+    description: "Accumulate 100 total lifetime squats.",
+    category: "MILESTONE",
+    unlocked: false,
+    currentProgress: 48,
+    maxProgress: 100,
+    progressUnit: "squats",
+  },
+  {
+    id: "iron_tendons",
+    title: "Iron Tendons",
+    icon: "🛡️",
+    tier: "PLATINUM",
+    description: "Complete a full set with zero knee-valgus deviations.",
+    category: "CLINICAL",
+    unlocked: true,
+    unlockedAt: "Sep 07, 2026",
+    currentProgress: 1,
+    maxProgress: 1,
+    progressUnit: "flawless set",
+  },
+  {
+    id: "zen_anchor",
+    title: "Zen Anchor",
+    icon: "⏱️",
+    tier: "SILVER",
+    description: "Accumulate over 30 cumulative seconds in isometric pause holds.",
+    category: "CLINICAL",
+    unlocked: false,
+    currentProgress: 24,
+    maxProgress: 30,
+    progressUnit: "seconds held",
+  },
+  {
+    id: "unbroken_rhythm",
+    title: "Unbroken Rhythm",
+    icon: "⚡",
+    tier: "GOLD",
+    description: "Achieve a 5x perfect deflection combo streak.",
+    category: "COMBAT",
+    unlocked: true,
+    unlockedAt: "Sep 09, 2026",
+    currentProgress: 5,
+    maxProgress: 5,
+    progressUnit: "streak",
+  },
+  {
+    id: "bilateral_master",
+    title: "Bilateral Master",
+    icon: "🔄",
+    tier: "PLATINUM",
+    description: "Maintain < 3% symmetry variance between left and right knees.",
+    category: "CLINICAL",
+    unlocked: true,
+    unlockedAt: "Sep 11, 2026",
+    currentProgress: 1.6,
+    maxProgress: 3.0,
+    progressUnit: "% variance",
+  },
+  {
+    id: "pushup_pioneer",
+    title: "Push-Up Pioneer",
+    icon: "💪",
+    tier: "SILVER",
+    description: "Complete 10 clean push-ups in a row (or circuit mode).",
+    category: "MILESTONE",
+    unlocked: false,
+    currentProgress: 6,
+    maxProgress: 10,
+    progressUnit: "push-ups",
+  },
+  {
+    id: "relentless_adherence",
+    title: "Relentless Adherence",
+    icon: "🔥",
+    tier: "DIAMOND",
+    description: "Maintain a 7-day workout streak.",
+    category: "MILESTONE",
+    unlocked: true,
+    unlockedAt: "Sep 11, 2026",
+    currentProgress: 7,
+    maxProgress: 7,
+    progressUnit: "days",
+  },
+  {
+    id: "clinical_graduation",
+    title: "Clinical Graduation",
+    icon: "🏆",
+    tier: "DIAMOND",
+    description: "Achieve ≥ 95% purity score across 3 consecutive sessions.",
+    category: "CLINICAL",
+    unlocked: false,
+    currentProgress: 2,
+    maxProgress: 3,
+    progressUnit: "sessions",
   },
 ];
 
@@ -1480,6 +1616,28 @@ export default function AthleteMindPage() {
   const activeDialogueIdRef = useRef<number | null>(1);
   const currentSlide = STORY_SCRIPT.find((s) => s.id === activeDialogueId) || null;
 
+  // Active Menu View State
+  const [activeView, setActiveView] = useState<ActiveView>("MAIN_MENU");
+  const [activeCircuitMode, setActiveCircuitMode] = useState<CircuitMode | null>(null);
+  const [circuitStep, setCircuitStep] = useState<number>(1);
+
+  // 10-Achievement System State
+  const [achievementsList, setAchievementsList] = useState<AchievementItem[]>(INITIAL_ACHIEVEMENTS);
+
+  // Camera & Hardware Diagnostics State
+  const [currentFps, setCurrentFps] = useState<number>(60);
+  const fpsRef = useRef<number>(60);
+  const lastFrameTimeRef = useRef<number>(0);
+  const lastDiagnosticUpdateRef = useRef<number>(0);
+  const [jointVisibility, setJointVisibility] = useState({
+    hips: 0.95,
+    knees: 0.92,
+    ankles: 0.88,
+    shoulders: 0.96,
+    overall: 0.93,
+  });
+  const [distanceStatus, setDistanceStatus] = useState<"OPTIMAL" | "TOO_CLOSE" | "TOO_FAR" | "SEARCHING">("SEARCHING");
+
   // DOM References
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1646,6 +1804,17 @@ export default function AthleteMindPage() {
         }
       } else {
         localStorage.setItem("athletemind_bio_credits", "350");
+      }
+
+      // Load Achievements
+      const savedAchievements = localStorage.getItem("unlocked_achievements");
+      if (savedAchievements) {
+        const parsedAch: AchievementItem[] = JSON.parse(savedAchievements);
+        if (Array.isArray(parsedAch) && parsedAch.length > 0) {
+          setAchievementsList(parsedAch);
+        }
+      } else {
+        localStorage.setItem("unlocked_achievements", JSON.stringify(INITIAL_ACHIEVEMENTS));
       }
     } catch {}
   }, []);
