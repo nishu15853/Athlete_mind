@@ -39,11 +39,22 @@ export const MainMenu: React.FC<MainMenuProps> = ({
 }) => {
   return (
     <div className="relative w-full h-full min-h-screen bg-[#050811] text-white flex flex-col items-center justify-between p-4 sm:p-8 font-mono select-none overflow-y-auto">
-      {/* Background Decorative Tech Grid & Ambient Glows */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-gradient-to-tr from-cyan-950/40 via-cyan-500/10 to-transparent blur-[140px] rounded-full" />
-        <div className="absolute bottom-10 right-10 w-96 h-96 bg-purple-950/30 blur-[130px] rounded-full" />
-        <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:32px_32px] opacity-25" />
+      {/* Dynamic Cosmic Main Menu Background */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <img
+          src="/main-menu-bg.jpg"
+          alt="Galaxy Main Menu Background"
+          className="w-full h-full object-cover object-center scale-100 transition-transform duration-1000"
+        />
+        {/* Deep space contrast overlays for HUD clarity */}
+        <div className="absolute inset-0 bg-[#050811]/60 mix-blend-multiply" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#050811]/80 via-[#050811]/40 to-[#050811]/85" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_25%,#050811_95%)]" />
+
+        {/* Ambient Cosmic Tech Glows */}
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[750px] h-[550px] bg-gradient-to-tr from-cyan-950/40 via-cyan-500/15 to-transparent blur-[140px] rounded-full" />
+        <div className="absolute bottom-10 right-10 w-96 h-96 bg-purple-950/40 blur-[130px] rounded-full" />
+        <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:32px_32px] opacity-20" />
       </div>
 
       {/* Top Bar: Callsign, Pilot Rank & Resource Indicators */}
