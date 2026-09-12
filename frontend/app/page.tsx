@@ -90,7 +90,6 @@ export interface BioEnginePayload {
   coach_feedback: string;
   weapon_overheated: boolean;
   symmetry?: number;
-  symmetry_score?: number;
   is_critical?: boolean;
   message?: string;
   circuit_phase?: number;
@@ -133,8 +132,6 @@ export interface ProjectileOrb {
   id: number;
   x: number;
   y: number;
-  vx?: number;
-  vy?: number;
   radius: number;
   maxRadius: number;
   color: string;
@@ -974,8 +971,8 @@ function drawVisuals(
     ctx.restore();
   }
 
-  // 3. Ghost Stickman Anchor: Safe Upper-Right Corner HUD (x = 120 under flip transforms to w - 120)
-  const ghostX = 120;
+  // 3. Ghost Stickman Anchor: Safe Upper-Right Corner HUD (x = canvas.width - 120, y = 80)
+  const ghostX = w - 120;
   const ghostY = 80;
 
   let ghostDepth = 0;
@@ -1364,14 +1361,6 @@ export default function Home() {
   const [cameraStatus, setCameraStatus] = useState<"INITIALIZING" | "ACTIVE" | "ERROR">("INITIALIZING");
   const [cameraError, setCameraError] = useState<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-
-  // Single-buffered rendering and decoupled inference refs
-  const latestLandmarksRef = useRef<Landmark[] | null>(null);
-  const isProcessingRef = useRef<boolean>(false);
-  const poseRef = useRef<PoseInstance | null>(null);
-  const curSideRef = useRef<"LEFT" | "RIGHT">("LEFT");
-  const isGhostSyncRef = useRef<boolean>(false);
-  const calibAngleRef = useRef<number>(180);
 
   // Stable Refs to prevent camera effect destruction during combat loops
   const currentBossRef = useRef(BOSS_CATALOG[selectedBossId] || BOSS_CATALOG.goliath);
@@ -2000,9 +1989,9 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [game.stage, selectedBossId]);
 
-    // 2. Single-Canvas Video + HUD Rendering Pipeline & Decoupled MediaPipe Inference
+  // MediaPipe Pose & Real-Time Biomechanical Stream
   useEffect(() => {
-    let isRunning = true;
+    if (!scriptReady || !window.Pose) return;
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/pose";
     const socket = new WebSocket(wsUrl);
@@ -2084,7 +2073,6 @@ export default function Home() {
             if (!hasClashedRef.current && nextHp <= currentBossRef.current.hp * 0.5 && nextHp > 0) {
               hasClashedRef.current = true;
               setIsClashActive(true);
-              isClashActiveRef.current = true;
               clashHoldStartRef.current = 0;
               sfx.sirenWarning();
               triggerBossDialogueRef.current(currentBossRef.current.taunts.clash);
@@ -2109,53 +2097,36 @@ export default function Home() {
             sfx.cadenceBonus();
             coachSpeak("Cadence sync! Critical hit!");
           } else {
-            coachSpeak("Clean strike! Keep the pressure on.");
+            sfx.hit();
           }
 
           triggerRumble(isCadenceSync ? 250 : 150);
           triggerFlashRef.current("HIT");
           triggerCombatPopupRef.current(popupText, isCadenceSync, curCombo >= 5);
-
-          spawnParticles(curJointRef.current.x, curJointRef.current.y, [
-            "#00f2fe", "#10b981", "#ffd700", isCadenceSync ? "#ec4899" : "#ffffff",
-          ]);
+          spawnParticles(
+            curJointRef.current.x,
+            curJointRef.current.y,
+            isCadenceSync ? ["#ffd700", "#10b981", "#38bdf8", "#f43f5e"] : ["#38bdf8", "#06b6d4", "#10b981", "#a855f7"]
+          );
+          spawnShockwave(curJointRef.current.x, curJointRef.current.y, isCadenceSync ? "#ffd700" : "#ffffff");
           spawnFloatingText(
             curJointRef.current.x,
             curJointRef.current.y,
-            popupText,
-            isCadenceSync ? "#ffd700" : "#00f0ff"
+            `+${finalDamage}`,
+            isCadenceSync ? "#fbbf24" : "#10b981"
           );
 
-          setOverdriveGauge((prev) => Math.min(100, prev + (isCadenceSync ? 18 : 12)));
-
-          setComboStreak((prev) => {
-            const nextCombo = prev + 1;
-            if (nextCombo === 3) coachSpeak("3-hit surge! Keep the rhythm!");
-            if (nextCombo === 5) {
-              coachSpeak("5-hit overdrive! Maximum power!");
-              sfx.fanfareChord();
-              triggerBossDialogueRef.current(currentBossRef.current.taunts.hit5x);
-            }
-            return nextCombo;
-          });
+          if (data.purity >= 70 && !data.fault_detected) {
+            setOverdriveGauge((prev) => Math.min(100, prev + 25));
+            setComboStreak((prev) => {
+              const next = Math.min(5, prev + 1);
+              if (next === 5) {
+                triggerBossDialogueRef.current(currentBossRef.current.taunts.hit5x);
+              }
+              return next;
+            });
+          }
         }
-
-        if (data.status === "penalty" && data.rep_count !== lastPenaltyRef.current) {
-          lastPenaltyRef.current = data.rep_count;
-          coachSpeak(data.coach_feedback || "Watch your form! Rep penalized.");
-          sfx.penalty();
-          sfx.glitchWarning();
-          triggerRumble(240);
-          triggerFlashRef.current("PENALTY");
-
-          setComboStreak(1);
-          triggerBossDialogueRef.current(currentBossRef.current.taunts.comboBreak);
-
-          spawnParticles(curJointRef.current.x, curJointRef.current.y, ["#ef4444", "#f87171", "#ffffff"]);
-          spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "COMBO BROKEN!", "#ef4444");
-        }
-
-        lastRepRef.current = data.rep_count;
 
         setGame((prev) => {
           let nextPlayerHp = prev.playerHp;
@@ -2163,56 +2134,65 @@ export default function Home() {
           let nextBossTimer = prev.bossAttackTimer;
           const nextStats = { ...prev.stats };
 
-          if (data.status === "penalty" && data.rep_count !== lastPenaltyRef.current) {
-            nextPlayerHp = Math.max(0, nextPlayerHp - 25);
-            nextOverheat = Math.min(100, nextOverheat + 25);
-            nextStats.egoPenalties += 1;
+          if (typeof data.symmetry === "number") {
+            nextStats.symmetryScores = [...prev.stats.symmetryScores, data.symmetry];
           }
 
-          if (isRepComplete || isHitEvent) {
-            nextStats.totalReps += 1;
-            nextStats.purityScores.push(data.purity);
-            nextStats.symmetryScores.push(data.symmetry_score || 98);
-            if (data.status === "CRITICAL HIT!") nextStats.cadenceBonusReps += 1;
-            if (data.valgus) nextStats.valgusWarnings += 1;
-          }
-
-          if (prev.stage === "ACTIVE" && !isBossDefeated && !isHolding && !isHold) {
-            nextBossTimer -= 0.05;
-            if (nextBossTimer <= 0) {
-              const isEnraged = bossHpRef.current <= currentBossRef.current.hp * 0.4;
-              nextBossTimer = isEnraged ? currentBossRef.current.attackInterval * 0.5 : currentBossRef.current.attackInterval;
-              const dmg = isEnraged ? 35 : 20;
-              nextPlayerHp = Math.max(0, nextPlayerHp - dmg);
-              sfx.bossAttack();
-              sfx.glitchWarning();
-              coachSpeak(isEnraged ? "Enraged attack! Brace yourself!" : "Boss strike landed!");
-              triggerRumble(250);
-              triggerFlashRef.current("PENALTY");
-
-              if (canvasRef.current) {
-                const cw = canvasRef.current.width;
-                const ch = canvasRef.current.height;
-                projectilesRef.current.push({
-                  id: Date.now() + Math.random(),
-                  x: cw / 2,
-                  y: ch * 0.22,
-                  vx: (Math.random() - 0.5) * 4.5,
-                  vy: 3.5 + Math.random() * 2.0,
-                  radius: 20,
-                  maxRadius: 40,
-                  color: isEnraged ? "#f43f5e" : "#a855f7",
-                  active: true,
-                });
-              }
-
-              setComboStreak(1);
+          if (data.valgus || data.fault_name === "VALGUS") {
+            nextStats.valgusWarnings += 1;
+            if (comboStreakRef.current > 1) {
               triggerBossDialogueRef.current(currentBossRef.current.taunts.comboBreak);
+            }
+            setComboStreak(1);
+          }
 
-              if (nextPlayerHp === 0) {
+          if (isRepComplete && data.rep_count > lastRepRef.current) {
+            lastRepRef.current = data.rep_count;
+            nextStats.totalReps += 1;
+            nextStats.purityScores = [...prev.stats.purityScores, data.purity];
+            nextStats.depthAngles = [...prev.stats.depthAngles, data.primary_angle];
+            nextStats.holdTimes = [...prev.stats.holdTimes, data.hold_time || 1.2];
+            const isCrit = (data.damage || 100) >= 80;
+            const nextStreak = isCrit ? prev.stats.currentCritStreak + 1 : 0;
+            nextStats.currentCritStreak = nextStreak;
+            nextStats.maxConsecutiveCrits = Math.max(prev.stats.maxConsecutiveCrits, nextStreak);
+
+            const now = Date.now();
+            const repDuration = (now - lastRepTimestampRef.current) / 1000;
+            const isCadenceSync = (repDuration >= 2.8 && repDuration <= 5.8) && (data.hold_time >= 0.7 || isHold);
+            if (isCadenceSync) {
+              nextStats.cadenceBonusReps = prev.stats.cadenceBonusReps + 1;
+            }
+
+            const isEnraged = bossHpRef.current <= currentBossRef.current.hp * 0.4;
+            nextBossTimer = isEnraged ? currentBossRef.current.attackInterval * 0.5 : currentBossRef.current.attackInterval;
+          }
+
+          if (data.status === "penalty") {
+            const now = Date.now();
+            if (now - lastPenaltyRef.current > 2000) {
+              lastPenaltyRef.current = now;
+              sfx.penalty();
+              sfx.glitchWarning();
+              triggerRumble(300);
+              triggerFlashRef.current("PENALTY");
+              spawnParticles(curJointRef.current.x, curJointRef.current.y, ["#ef4444", "#dc2626", "#b91c1c", "#f87171"]);
+              spawnShockwave(curJointRef.current.x, curJointRef.current.y, "#ef4444");
+              spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "! EGO LIFT", "#ef4444");
+
+              nextStats.egoPenalties += 1;
+              nextStats.currentCritStreak = 0;
+              if (comboStreakRef.current > 1) {
+                triggerBossDialogueRef.current(currentBossRef.current.taunts.comboBreak);
+              }
+              setComboStreak(1);
+              nextOverheat = 100;
+              nextPlayerHp = Math.max(0, prev.playerHp - 25);
+
+              if (nextPlayerHp <= 0) {
                 finishMatchRef.current("DEFEAT");
                 sfx.defeat();
-                coachSpeak("Health depleted. Encounter failed.");
+                coachSpeak("System critical. You have been defeated.");
               }
             }
           }
@@ -2231,154 +2211,149 @@ export default function Home() {
       }
     };
 
-    // Initialize MediaPipe Pose instance asynchronously
-    const initPose = () => {
-      if (!isRunning) return;
-      if (typeof window !== "undefined" && (window as unknown as { Pose?: new (config: { locateFile: (file: string) => string }) => PoseInstance }).Pose) {
-        const pose = new window.Pose!({
-          locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
-        });
-        poseRef.current = pose;
-        pose.setOptions({
-          modelComplexity: 1,
-          smoothLandmarks: true,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
+    const pose = new window.Pose({
+      locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+    });
 
-        pose.onResults((results: PoseResults) => {
-          if (!results.poseLandmarks) return;
-          latestLandmarksRef.current = results.poseLandmarks;
-          const lms = results.poseLandmarks;
-          const canvas = canvasRef.current;
-          const cw = canvas?.width || 640;
-          const ch = canvas?.height || 480;
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
 
-          const lSh = lms[11], rSh = lms[12];
-          const lHp = lms[23], rHp = lms[24];
-          const lAnk = lms[27], rAnk = lms[28];
+    pose.onResults((results: PoseResults) => {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (!canvas) return;
 
-          const leftVis = ((lHp?.visibility ?? 0) + (lms[25]?.visibility ?? 0) + (lAnk?.visibility ?? 0) + (lSh?.visibility ?? 0)) / 4;
-          const rightVis = ((rHp?.visibility ?? 0) + (lms[26]?.visibility ?? 0) + (rAnk?.visibility ?? 0) + (rSh?.visibility ?? 0)) / 4;
-          const curSide = rightVis > leftVis + 0.15 ? "RIGHT" : "LEFT";
-          curSideRef.current = curSide;
-          if (gameRef.current.trackedSide !== curSide) {
-            setGame((prev) => ({ ...prev, trackedSide: curSide }));
-          }
+      // 2. Landmark Coordinate Normalization: Sync internal drawing buffer with display size
+      if (video && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+      }
 
-          const activeEx = gameRef.current.engine.exercise || gameRef.current.exercise;
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (results.poseLandmarks) {
+        const lms = results.poseLandmarks;
+        const lSh = lms[11], rSh = lms[12];
+        const lHp = lms[23], rHp = lms[24];
+        const lAnk = lms[27], rAnk = lms[28];
+
+        const leftVis = ((lHp?.visibility ?? 0) + (lms[25]?.visibility ?? 0) + (lAnk?.visibility ?? 0) + (lSh?.visibility ?? 0)) / 4;
+        const rightVis = ((rHp?.visibility ?? 0) + (lms[26]?.visibility ?? 0) + (rAnk?.visibility ?? 0) + (rSh?.visibility ?? 0)) / 4;
+        const curSide = rightVis > leftVis + 0.15 ? "RIGHT" : "LEFT";
+        if (gameRef.current.trackedSide !== curSide) {
+          setGame((prev) => ({ ...prev, trackedSide: curSide }));
+        }
+
+        const activeEx = gameRef.current.engine.exercise || gameRef.current.exercise;
+        if (canvas) {
           if (activeEx === "squat") {
             const k = curSide === "RIGHT" ? lms[26] : lms[25];
-            if (k) curJointRef.current = { x: k.x * cw, y: k.y * ch };
+            if (k) curJointRef.current = { x: k.x * canvas.width, y: k.y * canvas.height };
           } else if (activeEx === "pushup" || activeEx === "overhead_press") {
             const w = curSide === "RIGHT" ? lms[16] : lms[15];
             const e = curSide === "RIGHT" ? lms[14] : lms[13];
             const pt = w || e;
-            if (pt) curJointRef.current = { x: pt.x * cw, y: pt.y * ch };
+            if (pt) curJointRef.current = { x: pt.x * canvas.width, y: pt.y * canvas.height };
           } else {
             const h = curSide === "RIGHT" ? rHp : lHp;
-            if (h) curJointRef.current = { x: h.x * cw, y: h.y * ch };
+            if (h) curJointRef.current = { x: h.x * canvas.width, y: h.y * canvas.height };
           }
+        }
 
-          if (gameRef.current.stage === "CALIBRATING") {
-            const ex = gameRef.current.exercise === "circuit" ? "squat" : gameRef.current.exercise;
-            if (ex === "squat") {
-              const k = curSide === "RIGHT" ? lms[26] : lms[25];
-              const h = curSide === "RIGHT" ? rHp : lHp;
-              const a = curSide === "RIGHT" ? lms[28] : lms[27];
-              if (k && h && a) {
-                const rad = Math.atan2(a.y - k.y, a.x - k.x) - Math.atan2(h.y - k.y, h.x - k.x);
-                let deg = Math.abs((rad * 180.0) / Math.PI);
-                if (deg > 180.0) deg = 360.0 - deg;
-                calibAngleRef.current = Math.round(deg);
-                if (!calibratedRomRef.current.squat_min || deg < calibratedRomRef.current.squat_min) {
-                  calibratedRomRef.current.squat_min = Math.round(deg);
-                }
-              }
-            } else if (ex === "pushup") {
-              const e = curSide === "RIGHT" ? lms[14] : lms[13];
-              const s = curSide === "RIGHT" ? lms[12] : lms[11];
-              const w = curSide === "RIGHT" ? lms[16] : lms[15];
-              if (e && s && w) {
-                const rad = Math.atan2(w.y - e.y, w.x - e.x) - Math.atan2(s.y - e.y, s.x - e.x);
-                let deg = Math.abs((rad * 180.0) / Math.PI);
-                if (deg > 180.0) deg = 360.0 - deg;
-                calibAngleRef.current = Math.round(deg);
-                if (!calibratedRomRef.current.pushup_min || deg < calibratedRomRef.current.pushup_min) {
-                  calibratedRomRef.current.pushup_min = Math.round(deg);
+        if (gameRef.current.stage === "CALIBRATING") {
+          const ex = gameRef.current.exercise === "circuit" ? "squat" : gameRef.current.exercise;
+          if (ex === "squat") {
+            const k = curSide === "RIGHT" ? lms[26] : lms[25];
+            const h = curSide === "RIGHT" ? rHp : lHp;
+            const a = curSide === "RIGHT" ? rAnk : lAnk;
+            if (k && h && a) {
+              const v1 = { x: h.x - k.x, y: h.y - k.y, z: (h.z || 0) - (k.z || 0) };
+              const v2 = { x: a.x - k.x, y: a.y - k.y, z: (a.z || 0) - (k.z || 0) };
+              const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+              const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y + v1.z * v1.z);
+              const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z);
+              if (mag1 > 0 && mag2 > 0) {
+                const deg = Math.round(Math.acos(Math.max(-1, Math.min(1, dot / (mag1 * mag2)))) * (180 / Math.PI));
+                if (deg < (calibratedRomRef.current.squat_min || 180) && deg >= 50) {
+                  calibratedRomRef.current.squat_min = deg;
+                  setDisplayCalibAngle(deg);
                 }
               }
             }
           }
+        }
 
-          const pack = (lm?: Landmark) => lm ? { x: lm.x, y: lm.y, z: lm.z, visibility: lm.visibility ?? 1.0 } : null;
-          const canStream = Boolean(lSh || rSh || lHp || rHp);
-          if (canStream && socketRef.current?.readyState === WebSocket.OPEN) {
-            socketRef.current.send(
-              JSON.stringify({
-                action: "process_frame",
-                exercise: gameRef.current.exercise,
-                side: curSide,
-                difficulty: gameRef.current.difficulty,
-                rom_calibration: calibratedRomRef.current,
-                left: {
-                  shoulder: pack(lms[11]), elbow: pack(lms[13]), wrist: pack(lms[15]),
-                  hip: pack(lHp), knee: pack(lms[25]), ankle: pack(lAnk),
-                  ear: pack(lms[7]),
-                },
-                right: {
-                  shoulder: pack(lms[12]), elbow: pack(lms[14]), wrist: pack(lms[16]),
-                  hip: pack(rHp), knee: pack(lms[26]), ankle: pack(rAnk),
-                  ear: pack(lms[8]),
-                },
-              })
-            );
-          }
+        const pack = (lm?: Landmark) => (lm ? [lm.x, lm.y, lm.z ?? 0, lm.visibility ?? 1] : null);
+        const canStream = Boolean(lSh || rSh || lHp || rHp);
+        if (canStream && socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(
+            JSON.stringify({
+              exercise: gameRef.current.exercise,
+              difficulty: gameRef.current.difficulty,
+              rom_calibration: calibratedRomRef.current,
+              left: {
+                shoulder: pack(lms[11]), elbow: pack(lms[13]), wrist: pack(lms[15]),
+                hip: pack(lHp), knee: pack(lms[25]), ankle: pack(lAnk),
+                ear: pack(lms[7]),
+              },
+              right: {
+                shoulder: pack(lms[12]), elbow: pack(lms[14]), wrist: pack(lms[16]),
+                hip: pack(rHp), knee: pack(lms[26]), ankle: pack(rAnk),
+                ear: pack(lms[8]),
+              },
+            })
+          );
+        }
 
-          if (isClashActiveRef.current) {
-            const kneeAngle = gameRef.current.engine.knee_angle ?? 180;
-            const isHoldingClash = kneeAngle <= 95 || gameRef.current.engine.phase.includes("HOLD");
+        if (isClashActiveRef.current) {
+          const kneeAngle = gameRef.current.engine.knee_angle ?? 180;
+          const isHoldingClash = kneeAngle <= 95 || gameRef.current.engine.phase.includes("HOLD");
 
-            if (isHoldingClash) {
-              if (clashHoldStartRef.current === 0) clashHoldStartRef.current = Date.now();
-              const holdElapsed = (Date.now() - clashHoldStartRef.current) / 1000;
-              const progress = Math.min(1.0, holdElapsed / 4.0);
-              clashProgressRef.current = progress;
+          if (isHoldingClash) {
+            if (clashHoldStartRef.current === 0) clashHoldStartRef.current = Date.now();
+            const holdElapsed = (Date.now() - clashHoldStartRef.current) / 1000;
+            const progress = Math.min(1.0, holdElapsed / 4.0);
+            setClashProgress(progress);
 
-              if (progress >= 1.0) {
-                setIsClashActive(false);
-                isClashActiveRef.current = false;
-                clashHoldStartRef.current = 0;
-                clashProgressRef.current = 0;
-                sfx.fanfareChord();
-                sfx.bassDrop();
-                triggerRumble(500);
-                triggerFlashRef.current("HIT");
-                triggerCombatPopupRef.current("⚔️ CLASH WON! -150 DMG!", true, true);
-                spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "COUNTER-STRIKE +150", "#10b981");
-                spawnParticles(curJointRef.current.x, curJointRef.current.y, ["#10b981", "#ffd700", "#38bdf8", "#ffffff"]);
-                spawnShockwave(curJointRef.current.x, curJointRef.current.y, "#10b981");
-
-                setBossHp((prev) => {
-                  const nextHp = Math.max(0, prev - 150);
-                  if (nextHp === 0) {
-                    finishMatchRef.current("VICTORY");
-                    sfx.victory();
-                    coachSpeak("Boss neutralized by massive counter-strike!");
-                  }
-                  return nextHp;
-                });
-                coachSpeak("Lock-in clash victorious! Massive counter-strike delivered!");
-              }
-            } else {
+            if (progress >= 1.0) {
+              setIsClashActive(false);
               clashHoldStartRef.current = 0;
-              clashProgressRef.current = 0;
-            }
-          }
+              setClashProgress(0);
+              sfx.fanfareChord();
+              sfx.bassDrop();
+              triggerRumble(500);
+              triggerFlashRef.current("HIT");
+              triggerCombatPopupRef.current("⚔️ CLASH WON! -150 DMG!", true, true);
+              spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "COUNTER-STRIKE +150", "#10b981");
+              spawnParticles(curJointRef.current.x, curJointRef.current.y, ["#10b981", "#ffd700", "#38bdf8", "#ffffff"]);
+              spawnShockwave(curJointRef.current.x, curJointRef.current.y, "#10b981");
 
+              setBossHp((prev) => {
+                const nextHp = Math.max(0, prev - 150);
+                if (nextHp === 0) {
+                  finishMatchRef.current("VICTORY");
+                  sfx.victory();
+                  coachSpeak("Boss neutralized by massive counter-strike!");
+                }
+                return nextHp;
+              });
+              coachSpeak("Lock-in clash victorious! Massive counter-strike delivered!");
+            }
+          } else {
+            clashHoldStartRef.current = 0;
+            setClashProgress(0);
+          }
+        }
+
+        if (canvas) {
           const lWrLm = lms[15], rWrLm = lms[16];
-          const lWrPx = lWrLm ? { x: lWrLm.x * cw, y: lWrLm.y * ch } : null;
-          const rWrPx = rWrLm ? { x: rWrLm.x * cw, y: rWrLm.y * ch } : null;
+          const lWrPx = lWrLm ? { x: lWrLm.x * canvas.width, y: lWrLm.y * canvas.height } : null;
+          const rWrPx = rWrLm ? { x: rWrLm.x * canvas.width, y: rWrLm.y * canvas.height } : null;
 
           projectilesRef.current.forEach((orb) => {
             if (!orb.active) return;
@@ -2404,149 +2379,148 @@ export default function Home() {
               coachSpeak("Projectile deflected! High-speed counter!");
             }
           });
+        }
 
-          const nowMs = performance.now();
-          const ghostCycle = (nowMs / 1000) % 4.5;
-          ghostTimeRef.current = ghostCycle;
+        const nowMs = performance.now();
+        const ghostCycle = (nowMs / 1000) % 4.5;
+        ghostTimeRef.current = ghostCycle;
 
-          const isSync = (ghostCycle < 0.4 || (ghostCycle > 1.8 && ghostCycle < 2.2) || (ghostCycle > 3.3 && ghostCycle < 3.7)) &&
-            (gameRef.current.engine.phase.includes("HOLD") || (gameRef.current.engine.knee_angle ?? 180) <= 100);
-          isGhostSyncRef.current = isSync;
+        let ghostDepthRatio = 0;
+        if (ghostCycle < 2.0) {
+          ghostDepthRatio = ghostCycle / 2.0;
+        } else if (ghostCycle < 3.5) {
+          ghostDepthRatio = 1.0;
+        } else {
+          ghostDepthRatio = Math.max(0, 1.0 - (ghostCycle - 3.5) / 1.0);
+        }
 
-          if (hazardRef.current.type !== "NONE") {
-            const elapsed = nowMs - hazardRef.current.startTime;
-            const warn = hazardRef.current.warningDuration;
-            const dur = hazardRef.current.duration;
+        const playerAngle = gameRef.current.engine.primary_angle ?? 180;
+        const playerDepthRatio = Math.max(0, Math.min(1.0, (180 - playerAngle) / (180 - 85)));
+        const isSync = Math.abs(playerDepthRatio - ghostDepthRatio) <= 0.12 && playerDepthRatio > 0.25;
+        setIsGhostSync(isSync);
 
-            if (elapsed >= dur) {
-              setHazard({ type: "NONE", phase: "WARNING", startTime: 0, duration: 4500, warningDuration: 1800, duckThresholdY: 0.38 });
-            } else if (elapsed >= warn && hazardRef.current.phase === "WARNING") {
-              setHazard((prev) => ({ ...prev, phase: "ACTIVE" }));
-            } else if (hazardRef.current.phase === "ACTIVE") {
-              if (hazardRef.current.type === "HIGH_LASER") {
-                const nose = lms[0];
-                const isDucked = (nose && nose.y > hazardRef.current.duckThresholdY) || (gameRef.current.engine.knee_angle ?? 180) <= 115;
+        const isHoldingSquat = gameRef.current.engine.phase.includes("HOLD") || (gameRef.current.engine.knee_angle ?? 180) <= 95;
+        sfx.setMuffled(isHoldingSquat);
 
-                if (isDucked) {
-                  setHazard((prev) => ({ ...prev, phase: "CLEARED" }));
-                  sfx.dodgeSuccess();
-                  sfx.bassDrop();
-                  triggerRumble(200);
-                  triggerFlashRef.current("HIT");
-                  triggerCombatPopupRef.current("LASER EVADED! +150", true, false);
-                  spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "PARRIED +150", "#10b981");
-                  setBossHp((prev) => Math.max(0, prev - 150));
-                  setOverdriveGauge((prev) => Math.min(100, prev + 25));
-                  coachSpeak("Laser parried! Excellent evasion!");
-                } else if (elapsed >= warn + 1600) {
-                  setHazard((prev) => ({ ...prev, phase: "FAILED" }));
-                  sfx.penalty();
-                  triggerRumble(400);
-                  triggerFlashRef.current("PENALTY");
-                  setGame((prev) => {
-                    const nextHp = Math.max(0, prev.playerHp - 30);
-                    if (nextHp === 0) finishMatchRef.current("DEFEAT");
-                    return { ...prev, playerHp: nextHp };
-                  });
-                  coachSpeak("Laser hit! Warning, drop low to dodge!");
-                }
+        if (hazardRef.current.type !== "NONE") {
+          const now = Date.now();
+          const elapsed = now - hazardRef.current.startTime;
+          const total = hazardRef.current.duration;
+          const warn = hazardRef.current.warningDuration;
+
+          if (elapsed >= total) {
+            setHazard((prev) => ({ ...prev, type: "NONE" }));
+          } else if (elapsed >= warn && hazardRef.current.phase === "WARNING") {
+            setHazard((prev) => ({ ...prev, phase: "ACTIVE" }));
+          } else if (hazardRef.current.phase === "ACTIVE") {
+            if (hazardRef.current.type === "HIGH_LASER") {
+              const nose = lms[0];
+              const isDucked = (nose && nose.y > hazardRef.current.duckThresholdY) || (gameRef.current.engine.knee_angle ?? 180) <= 115;
+
+              if (isDucked) {
+                setHazard((prev) => ({ ...prev, phase: "CLEARED" }));
+                sfx.dodgeSuccess();
+                sfx.bassDrop();
+                triggerRumble(200);
+                triggerFlashRef.current("HIT");
+                triggerCombatPopupRef.current("LASER EVADED! +150", true, false);
+                spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "PARRIED +150", "#10b981");
+                setBossHp((prev) => Math.max(0, prev - 150));
+                setOverdriveGauge((prev) => Math.min(100, prev + 25));
+                coachSpeak("Laser parried! Excellent evasion!");
+              } else if (elapsed >= warn + 1600) {
+                setHazard((prev) => ({ ...prev, phase: "FAILED" }));
+                sfx.penalty();
+                sfx.glitchWarning();
+                triggerRumble(350);
+                triggerFlashRef.current("PENALTY");
+                spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "-30 LASER HIT", "#ef4444");
+                setGame((prev) => {
+                  const nextHp = Math.max(0, prev.playerHp - 30);
+                  if (nextHp <= 0) {
+                    finishMatchRef.current("DEFEAT");
+                    sfx.defeat();
+                    coachSpeak("Laser strike fatal. Reboot arena.");
+                  }
+                  return { ...prev, playerHp: nextHp };
+                });
+                setComboStreak(1);
               }
             }
           }
-        });
-      } else {
-        setTimeout(initPose, 120);
-      }
-    };
-    initPose();
+        }
 
-    // 3. Decoupled MediaPipe Detection Frequency
-    const processPose = async () => {
-      const video = videoRef.current;
-      if (video && !isProcessingRef.current && poseRef.current && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        isProcessingRef.current = true;
-        try {
-          await poseRef.current.send({ image: video });
-        } catch {
-          // ignore dropped frame
-        } finally {
-          isProcessingRef.current = false;
+        if (ctx && canvas) {
+          // Apply horizontal flip to match video mirroring:
+          ctx.save();
+          ctx.scale(-1, 1);
+          ctx.translate(-canvas.width, 0);
+
+          drawVisuals(
+            ctx,
+            canvas.width,
+            canvas.height,
+            lms,
+            gameRef.current.engine,
+            gameRef.current.engine.exercise || gameRef.current.exercise,
+            curSide,
+            particlesRef.current,
+            floatingTextsRef.current,
+            shockwavesRef.current,
+            projectilesRef.current,
+            nowMs,
+            hazardRef.current,
+            ghostCycle,
+            isSync,
+            comboStreakRef.current,
+            spiritBombProgressRef.current,
+            bossHpRef.current <= currentBossRef.current.hp * 0.4 && bossHpRef.current > 0,
+            isClashActiveRef.current,
+            clashProgressRef.current
+          );
+
+          ctx.restore();
         }
       }
-    };
+    });
 
-    // 2. Single-Canvas Video + HUD 60 FPS Render Loop
-    const render = () => {
+    // 2. Decouple Pose Inference from the Render Loop
+    let isRunning = true;
+    let isProcessing = false;
+    let animationFrameId: number;
+
+    const renderLoop = async () => {
       if (!isRunning) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
-
       if (video && canvas && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
-          }
-
-          // 1. Draw mirrored webcam frame directly to canvas
-          ctx.save();
-          ctx.scale(-1, 1);
-          ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-          ctx.restore();
-
-          // 2. Draw skeleton and HUD directly on top of the frame
-          if (latestLandmarksRef.current) {
-            ctx.save();
-            ctx.scale(-1, 1);
-            ctx.translate(-canvas.width, 0);
-
-            drawVisuals(
-              ctx,
-              canvas.width,
-              canvas.height,
-              latestLandmarksRef.current,
-              gameRef.current.engine,
-              gameRef.current.engine.exercise || gameRef.current.exercise,
-              curSideRef.current,
-              particlesRef.current,
-              floatingTextsRef.current,
-              shockwavesRef.current,
-              projectilesRef.current,
-              performance.now(),
-              hazardRef.current,
-              ghostTimeRef.current,
-              isGhostSyncRef.current,
-              comboStreakRef.current,
-              spiritBombProgressRef.current,
-              bossHpRef.current <= currentBossRef.current.hp * 0.4 && bossHpRef.current > 0,
-              isClashActiveRef.current,
-              clashProgressRef.current
-            );
-
-            ctx.restore();
-          }
+        // Match canvas buffer dimensions once
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth || 640;
+          canvas.height = video.videoHeight || 480;
         }
 
         // Non-blocking pose submission
-        processPose();
+        if (!isProcessing && window.Pose) {
+          isProcessing = true;
+          pose.send({ image: video }).finally(() => {
+            isProcessing = false;
+          });
+        }
       }
-
       if (isRunning) {
-        animationFrameId.current = requestAnimationFrame(render);
+        animationFrameId = requestAnimationFrame(renderLoop);
       }
     };
-
-    animationFrameId.current = requestAnimationFrame(render);
+    animationFrameId = requestAnimationFrame(renderLoop);
 
     return () => {
       isRunning = false;
-      if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
-      try { poseRef.current?.close(); } catch { /* noop */ }
-      poseRef.current = null;
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      try { pose.close(); } catch { /* noop */ }
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
     };
-  }, []);
+  }, [scriptReady]);
 
   const isEgoLift = game.engine.status === "penalty" || game.engine.phase === "STUNNED";
   const isCriticalHit = game.engine.status === "hit" || game.engine.status === "CRITICAL HIT!" || Boolean(game.engine.damage > 0);
@@ -2904,7 +2878,7 @@ export default function Home() {
               )}
             </div>
 
-            {/* SINGLE-BUFFERED CANVAS VIEWPORT (Zero GPU Overlay Stacking Flicker) */}
+            {/* VIDEO & CANVAS VIEWPORT */}
             <div className={`relative w-[640px] h-[480px] rounded-2xl overflow-hidden shadow-2xl bg-black mb-4 border ${
               isBossEnraged
                 ? "border-rose-500 shadow-[0_0_60px_rgba(244,63,94,0.9)] ring-4 ring-rose-500/80 animate-pulse"
@@ -2914,20 +2888,16 @@ export default function Home() {
                 ? "border-yellow-400 ring-4 ring-yellow-400 shadow-[0_0_40px_rgba(250,204,21,0.6)] animate-rumble"
                 : "border-slate-800"
             } transition-transform duration-75`}>
-              {/* Offscreen video decoding element feeding single canvas buffer */}
               <video
                 ref={videoRef}
+                autoPlay
                 playsInline
                 muted
-                autoPlay
-                className="hidden"
+                className="absolute inset-0 w-full h-full object-cover scale-x-[-1] z-0"
               />
-              {/* Single canvas displaying both the mirrored webcam feed and combat HUD */}
               <canvas
                 ref={canvasRef}
-                width={640}
-                height={480}
-                className="w-full h-full object-cover"
+                className="absolute inset-0 w-full h-full pointer-events-none z-10"
               />
 
               {/* Camera Status & Reconnect Overlay (Non-blocking, zero pitch-black obstruction) */}
