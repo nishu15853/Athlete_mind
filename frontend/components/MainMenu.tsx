@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 
 export type ActiveView =
   | "MAIN_MENU"
@@ -37,6 +37,67 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onOpenExerciseSelector,
   onNavigate,
 }) => {
+  const [isExploding, setIsExploding] = useState(false);
+
+  // Synthesize a thunderous cosmic explosion sound via Web Audio API
+  const playExplosionSound = () => {
+    try {
+      if (typeof window === "undefined") return;
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+
+      // White noise buffer for explosion rumble
+      const bufferSize = Math.floor(ctx.sampleRate * 1.0);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      // Lowpass filter for deep muffled explosion roar
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(700, ctx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(30, ctx.currentTime + 1.0);
+
+      // Sub-bass punch oscillator for kinetic shockwave
+      const osc = ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(160, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(20, ctx.currentTime + 0.85);
+
+      const oscGain = ctx.createGain();
+      oscGain.gain.setValueAtTime(0.8, ctx.currentTime);
+      oscGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.85);
+
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.7, ctx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.0);
+
+      osc.connect(oscGain).connect(ctx.destination);
+      noise.connect(filter).connect(noiseGain).connect(ctx.destination);
+
+      osc.start();
+      noise.start();
+      osc.stop(ctx.currentTime + 0.9);
+      noise.stop(ctx.currentTime + 1.05);
+    } catch (e) {
+      // AudioContext fallback
+    }
+  };
+
+  const handleRocketLaunch = () => {
+    if (isExploding) return;
+    setIsExploding(true);
+    playExplosionSound();
+    setTimeout(() => {
+      onNavigate("ARENA");
+    }, 1100);
+  };
+
   return (
     <div className="relative w-full h-full min-h-screen bg-[#050811] text-white flex flex-col items-center justify-between p-4 sm:p-8 font-mono select-none overflow-y-auto">
       {/* High-Definition Cosmic Starfield Background - Completely Unblurred & Prominent */}
@@ -120,73 +181,126 @@ export const MainMenu: React.FC<MainMenuProps> = ({
 
       {/* Primary Navigation Shell */}
       <main className="relative z-10 w-full max-w-6xl flex flex-col items-center mb-8">
-        {/* Primary Command Deck: Combat Arena & System Settings */}
-        <div className="w-full grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mb-8">
-        {/* Option 1: Primary Arena / Combat Encounter (Full Width on Mobile, 2 Cols on Desktop) */}
-        <button
-          onClick={() => onNavigate("ARENA")}
-          className="group relative lg:col-span-2 p-6 rounded-3xl bg-gradient-to-br from-cyan-950/80 via-slate-950/90 to-slate-900/90 border-2 border-cyan-500/70 hover:border-cyan-400 transition-all duration-300 cursor-pointer shadow-[0_0_35px_rgba(0,240,255,0.25)] hover:shadow-[0_0_55px_rgba(0,240,255,0.45)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
-        >
-          <div className="absolute -right-12 -bottom-12 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl group-hover:bg-cyan-500/20 transition-all" />
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-3xl sm:text-4xl">⚔️</span>
-            <span className="px-3 py-1 rounded-xl bg-cyan-500 text-black text-xs font-black tracking-widest uppercase shadow-[0_0_15px_rgba(0,240,255,0.6)]">
-              PRIMARY MODE
+        {/* GIANT FLAGSHIP ROCKET: COMBAT ARENA LAUNCHER (Size of 3+ planets, click to explode into Arena) */}
+        <div className="relative w-full flex flex-col items-center justify-center my-3 sm:my-5 select-none">
+          {/* Tactical Flagship Telemetry Badge */}
+          <div className="flex items-center gap-2 px-4 py-1 rounded-full bg-slate-950/90 border border-cyan-500/60 shadow-[0_0_20px_rgba(0,240,255,0.3)] mb-2">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+            <span className="text-[10px] sm:text-xs font-mono font-black text-cyan-300 tracking-[0.2em] uppercase">
+              FLAGSHIP COMBAT VESSEL // ATHLETEMIND EXPLORER
+            </span>
+            <span className="text-[10px] text-slate-400 font-mono hidden md:inline">
+              [ TARGET: {activeExerciseName.toUpperCase()} ]
             </span>
           </div>
-          <div>
-            <h2 className="text-xl sm:text-2xl font-black text-white group-hover:text-cyan-300 uppercase tracking-wider mb-1 transition-colors">
-              START COMBAT / {activeExerciseName.toUpperCase()} ARENA
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-mono">
-              Deflect high-mass incoming kinetic shockwaves by squatting and holding depth. 
-              Real-time biomechanical skeleton, timed parrying, and Colossus boss encounters.
-            </p>
-          </div>
-          <div className="mt-4 flex items-center gap-2 text-xs font-bold text-cyan-400 uppercase tracking-widest">
-            <span>ENTER SIMULATION</span>
-            <span className="group-hover:translate-x-1 transition-transform">→</span>
-          </div>
-        </button>
 
-        {/* Option 7: System Settings & Audio Customization */}
-        <button
-          onClick={() => onNavigate("SETTINGS")}
-          className="group relative p-6 rounded-3xl bg-slate-950/80 hover:bg-slate-900/90 border border-slate-700/60 hover:border-slate-500 transition-all duration-300 cursor-pointer shadow-xl hover:shadow-[0_0_30px_rgba(148,163,184,0.2)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-3xl">⚙️</span>
-            <span className="px-2.5 py-0.5 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 text-[10px] font-black uppercase">
-              CONFIG
+          {/* Interactive Giant Rocket Hull & Explosion Container */}
+          <button
+            onClick={handleRocketLaunch}
+            disabled={isExploding}
+            className="relative group w-full max-w-[620px] sm:max-w-[760px] md:max-w-[920px] h-52 sm:h-64 md:h-80 flex items-center justify-center cursor-pointer focus:outline-none transition-transform duration-300"
+            title="Click Flagship to Launch Combat Arena!"
+          >
+            {/* Ambient Engine Ion Glow */}
+            <div
+              className={`absolute inset-x-12 inset-y-6 bg-cyan-500/20 group-hover:bg-cyan-500/40 blur-3xl rounded-full transition-all duration-500 -z-10 ${
+                isExploding ? "opacity-0" : "opacity-100"
+              }`}
+            />
+
+            {/* Rocket Image with Idle Floating & Thruster Flare */}
+            <div
+              className={`relative w-full h-full flex items-center justify-center ${
+                isExploding
+                  ? "animate-ship-explode"
+                  : "animate-rocket-float group-hover:scale-105 transition-transform duration-300"
+              }`}
+            >
+              {/* Ion Engine Thruster Flame at Left/Rear */}
+              {!isExploding && (
+                <div className="absolute left-[8%] bottom-[22%] w-24 h-12 bg-gradient-to-l from-cyan-400 via-blue-500 to-transparent blur-md rounded-full animate-pulse pointer-events-none -z-10" />
+              )}
+
+              <img
+                src="/rocket.png"
+                alt="Athletemind Explorer Giant Flagship Rocket"
+                className="w-full h-full object-contain filter drop-shadow-[0_15px_30px_rgba(0,0,0,0.85)] group-hover:drop-shadow-[0_0_50px_rgba(0,240,255,0.85)] select-none pointer-events-none"
+              />
+            </div>
+
+            {/* Supernova Explosion FX Layer when Clicked */}
+            {isExploding && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50">
+                {/* Center Supernova Fireball */}
+                <div className="w-52 h-52 sm:w-72 sm:h-72 rounded-full bg-gradient-to-r from-yellow-300 via-orange-500 to-red-600 animate-fireball shadow-[0_0_120px_rgba(255,100,0,1)]" />
+
+                {/* Blinding White-Hot Core Flash */}
+                <div className="absolute w-40 h-40 rounded-full bg-white animate-fireball blur-sm" />
+
+                {/* Expanding Plasma Cyan Shockwave Ring */}
+                <div className="absolute w-72 h-72 rounded-full border-4 border-cyan-400 animate-shockwave shadow-[0_0_60px_rgba(0,240,255,0.9)]" />
+
+                {/* Secondary Golden Shockwave Ring */}
+                <div className="absolute w-72 h-72 rounded-full border-4 border-amber-400 animate-shockwave-delay shadow-[0_0_70px_rgba(245,158,11,0.9)]" />
+
+                {/* Tactical Screen Flash */}
+                <div className="fixed inset-0 bg-white/30 pointer-events-none animate-pulse" />
+              </div>
+            )}
+          </button>
+
+          {/* Launch Cue Indicator */}
+          <div className="mt-1 flex items-center gap-2">
+            <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-cyan-400 uppercase bg-slate-950/85 px-4 py-1.5 rounded-full border border-cyan-500/40 shadow-md">
+              {isExploding
+                ? "💥 DETONATING ENGINE // ENTERING COMBAT SIMULATION..."
+                : "⚡ CLICK FLAGSHIP TO LAUNCH COMBAT ARENA"}
             </span>
           </div>
-          <div>
-            <h2 className="text-lg font-black text-white group-hover:text-slate-200 uppercase tracking-wider mb-1 transition-colors">
-              SYSTEM SETTINGS
-            </h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Synthesizer audio profiles (Arcade Synth vs. Heavy Mecha), skeletal shaders, rest day locks, and storage reset.
-            </p>
-          </div>
-          <div className="mt-4 text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-            <span>PREFERENCES →</span>
-          </div>
-        </button>
-      </div>
-
-      {/* Celestial Planetary Exploration Sector - 5 Floating, Hovering & Tilting Worlds */}
-      <section className="relative z-10 w-full max-w-6xl mb-10">
-        <div className="flex items-center justify-between px-2 mb-6">
-          <div className="flex items-center gap-2 text-[11px] font-mono font-bold text-cyan-400 tracking-[0.25em] uppercase">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-            <span>PLANETARY EXPEDITIONS // 5 ORBITAL SECTORS</span>
-          </div>
-          <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase hidden sm:inline">
-            ENGAGE CELESTIAL TARGET
-          </span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6 sm:gap-8 items-start justify-items-center">
+        {/* Celestial Solar & Planetary Exploration Sector - 6 Floating, Hovering & Tilting Worlds */}
+        <section className="relative z-10 w-full max-w-6xl mb-10 mt-4">
+          <div className="flex items-center justify-between px-2 mb-6">
+            <div className="flex items-center gap-2 text-[11px] font-mono font-bold text-cyan-400 tracking-[0.25em] uppercase">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <span>SOLAR SYSTEM & PLANETARY ORBITS // 6 CELESTIAL SECTORS</span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase hidden sm:inline">
+              SELECT CELESTIAL SECTOR
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-5 sm:gap-6 items-start justify-items-center">
+            {/* Celestial Body 1: The Sun (System Settings & Config) */}
+            <button
+              onClick={() => onNavigate("SETTINGS")}
+              className="group flex flex-col items-center cursor-pointer transition-all duration-300 focus:outline-none w-full max-w-[200px]"
+              title="System Settings & Audio Customization"
+            >
+              <div className="relative w-28 h-28 sm:w-32 sm:h-32 md:w-36 md:h-36 flex items-center justify-center animate-sun">
+                <div className="absolute inset-2 rounded-full bg-amber-500/35 group-hover:bg-amber-500/65 blur-2xl transition-all duration-500 -z-10 group-hover:scale-130 shadow-[0_0_45px_rgba(245,158,11,0.7)]" />
+                <img
+                  src="/sun.png"
+                  alt="Solar Core System Settings"
+                  className="w-full h-full object-contain filter drop-shadow-[0_8px_25px_rgba(0,0,0,0.8)] group-hover:drop-shadow-[0_0_35px_rgba(245,158,11,0.95)] group-hover:scale-110 transition-transform duration-300 select-none pointer-events-none"
+                />
+              </div>
+              <div className="mt-3 flex flex-col items-center text-center">
+                <div className="px-3 py-1 rounded-full bg-slate-950/85 border border-amber-500/60 group-hover:border-amber-400 shadow-lg flex items-center gap-1.5 transition-all">
+                  <span className="text-sm">⚙️</span>
+                  <span className="text-xs font-black text-amber-300 group-hover:text-white uppercase tracking-wider font-mono">
+                    SETTINGS
+                  </span>
+                </div>
+                <span className="text-[10px] text-amber-400/90 font-mono font-bold uppercase tracking-widest mt-1">
+                  SOLAR CORE
+                </span>
+                <span className="text-[11px] text-slate-400 font-mono mt-0.5 line-clamp-2 leading-tight">
+                  Audio & Shaders
+                </span>
+              </div>
+            </button>
           {/* Planet 1: Circuit Training Modes (Magma Planet) */}
           <button
             onClick={() => onNavigate("CIRCUIT_SELECT")}
