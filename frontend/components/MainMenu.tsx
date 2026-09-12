@@ -118,9 +118,11 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         )}
       </div>
 
-      {/* Primary Navigation Grid (7 High-Impact Neon Modules) */}
-      <main className="relative z-10 w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 mb-8">
-        {/* Tile 1: Primary Arena / Combat Encounter (Full Width or Featured) */}
+      {/* Primary Navigation Shell */}
+      <main className="relative z-10 w-full max-w-6xl flex flex-col items-center mb-8">
+        {/* Primary Command Deck: Combat Arena & System Settings */}
+        <div className="w-full grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mb-8">
+        {/* Option 1: Primary Arena / Combat Encounter (Full Width on Mobile, 2 Cols on Desktop) */}
         <button
           onClick={() => onNavigate("ARENA")}
           className="group relative lg:col-span-2 p-6 rounded-3xl bg-gradient-to-br from-cyan-950/80 via-slate-950/90 to-slate-900/90 border-2 border-cyan-500/70 hover:border-cyan-400 transition-all duration-300 cursor-pointer shadow-[0_0_35px_rgba(0,240,255,0.25)] hover:shadow-[0_0_55px_rgba(0,240,255,0.45)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
@@ -147,127 +149,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           </div>
         </button>
 
-        {/* Tile 2: Circuit Training Modes */}
-        <button
-          onClick={() => onNavigate("CIRCUIT_SELECT")}
-          className="group relative p-6 rounded-3xl bg-slate-950/80 hover:bg-slate-900/90 border border-amber-500/50 hover:border-amber-400 transition-all duration-300 cursor-pointer shadow-xl hover:shadow-[0_0_35px_rgba(245,158,11,0.3)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-3xl">⚡</span>
-            <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/50 text-amber-300 text-[10px] font-black uppercase">
-              PROTOCOLS
-            </span>
-          </div>
-          <div>
-            <h2 className="text-lg font-black text-white group-hover:text-amber-300 uppercase tracking-wider mb-1 transition-colors">
-              CIRCUIT TRAINING MODES
-            </h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Multi-exercise protocols: Hyper-Tension pauses, Full-Body overhead gauntlets, and Rehab endurance.
-            </p>
-          </div>
-          <div className="mt-4 text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-            <span>CONFIGURE CIRCUITS →</span>
-          </div>
-        </button>
-
-        {/* Tile 3: Recovery Comparison & Analytics */}
-        <button
-          onClick={() => onNavigate("COMPARISON")}
-          className="group relative p-6 rounded-3xl bg-slate-950/80 hover:bg-slate-900/90 border border-teal-500/50 hover:border-teal-400 transition-all duration-300 cursor-pointer shadow-xl hover:shadow-[0_0_35px_rgba(20,184,166,0.3)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-3xl">📊</span>
-            <span className="px-2.5 py-0.5 rounded-lg bg-teal-500/20 border border-teal-500/50 text-teal-300 text-[10px] font-black uppercase">
-              DELTAS
-            </span>
-          </div>
-          <div>
-            <h2 className="text-lg font-black text-white group-hover:text-teal-300 uppercase tracking-wider mb-1 transition-colors">
-              RECOVERY COMPARISON
-            </h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Side-by-side Day 1 Baseline vs. Best vs. Today telemetry, recovery curves, and range-of-motion gains.
-            </p>
-          </div>
-          <div className="mt-4 text-xs font-bold text-teal-400 uppercase tracking-wider flex items-center gap-1.5">
-            <span>VIEW TRAJECTORY →</span>
-          </div>
-        </button>
-
-        {/* Tile 4: Achievements System */}
-        <button
-          onClick={() => onNavigate("ACHIEVEMENTS")}
-          className="group relative p-6 rounded-3xl bg-slate-950/80 hover:bg-slate-900/90 border border-yellow-500/50 hover:border-yellow-400 transition-all duration-300 cursor-pointer shadow-xl hover:shadow-[0_0_35px_rgba(234,179,8,0.3)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-3xl">🏆</span>
-            <span className="px-2.5 py-0.5 rounded-lg bg-yellow-500/20 border border-yellow-500/50 text-yellow-300 text-[10px] font-black uppercase">
-              {unlockedAchievementsCount}/{totalAchievementsCount} UNLOCKED
-            </span>
-          </div>
-          <div>
-            <h2 className="text-lg font-black text-white group-hover:text-yellow-300 uppercase tracking-wider mb-1 transition-colors">
-              ACHIEVEMENTS SHOWCASE
-            </h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              10 clinical and arcade milestone medals: First Blood, Iron Tendons, Zen Anchor, and Graduation honors.
-            </p>
-          </div>
-          <div className="mt-4 text-xs font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
-            <span>INSPECT MEDALS →</span>
-          </div>
-        </button>
-
-        {/* Tile 5: Clinical Telemetry */}
-        <button
-          onClick={() => onNavigate("TELEMETRY")}
-          className="group relative p-6 rounded-3xl bg-slate-950/80 hover:bg-slate-900/90 border border-emerald-500/50 hover:border-emerald-400 transition-all duration-300 cursor-pointer shadow-xl hover:shadow-[0_0_35px_rgba(16,185,129,0.3)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-3xl">📈</span>
-            <span className="px-2.5 py-0.5 rounded-lg bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 text-[10px] font-black uppercase">
-              RAW DATA
-            </span>
-          </div>
-          <div>
-            <h2 className="text-lg font-black text-white group-hover:text-emerald-300 uppercase tracking-wider mb-1 transition-colors">
-              CLINICAL TELEMETRY
-            </h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Real-time joint angle sparklines, isometric time-under-tension breakdown, bilateral symmetry, and CSV export.
-            </p>
-          </div>
-          <div className="mt-4 text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-            <span>VIEW TELEMETRY & CSV →</span>
-          </div>
-        </button>
-
-        {/* Tile 6: Camera Test & Hardware Sensor Diagnostics */}
-        <button
-          onClick={() => onNavigate("CAMERA_TEST")}
-          className="group relative p-6 rounded-3xl bg-slate-950/80 hover:bg-slate-900/90 border border-purple-500/50 hover:border-purple-400 transition-all duration-300 cursor-pointer shadow-xl hover:shadow-[0_0_35px_rgba(168,85,247,0.3)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-3xl">📷</span>
-            <span className="px-2.5 py-0.5 rounded-lg bg-purple-500/20 border border-purple-500/50 text-purple-300 text-[10px] font-black uppercase">
-              SENSOR TEST
-            </span>
-          </div>
-          <div>
-            <h2 className="text-lg font-black text-white group-hover:text-purple-300 uppercase tracking-wider mb-1 transition-colors">
-              CAMERA & CALIBRATION TEST
-            </h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Full-screen mirrored sensor feed with FPS counter, resolution gauge, joint confidence, and distance reticle.
-            </p>
-          </div>
-          <div className="mt-4 text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
-            <span>RUN SENSOR DIAGNOSTICS →</span>
-          </div>
-        </button>
-
-        {/* Tile 7: Settings & Audio Customization */}
+        {/* Option 7: System Settings & Audio Customization */}
         <button
           onClick={() => onNavigate("SETTINGS")}
           className="group relative p-6 rounded-3xl bg-slate-950/80 hover:bg-slate-900/90 border border-slate-700/60 hover:border-slate-500 transition-all duration-300 cursor-pointer shadow-xl hover:shadow-[0_0_30px_rgba(148,163,184,0.2)] text-left flex flex-col justify-between overflow-hidden transform hover:-translate-y-1"
@@ -290,6 +172,172 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <span>PREFERENCES →</span>
           </div>
         </button>
+      </div>
+
+      {/* Celestial Planetary Exploration Sector - 5 Floating, Hovering & Tilting Worlds */}
+      <section className="relative z-10 w-full max-w-6xl mb-10">
+        <div className="flex items-center justify-between px-2 mb-6">
+          <div className="flex items-center gap-2 text-[11px] font-mono font-bold text-cyan-400 tracking-[0.25em] uppercase">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+            <span>PLANETARY EXPEDITIONS // 5 ORBITAL SECTORS</span>
+          </div>
+          <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase hidden sm:inline">
+            ENGAGE CELESTIAL TARGET
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6 sm:gap-8 items-start justify-items-center">
+          {/* Planet 1: Circuit Training Modes (Magma Planet) */}
+          <button
+            onClick={() => onNavigate("CIRCUIT_SELECT")}
+            className="group flex flex-col items-center cursor-pointer transition-all duration-300 focus:outline-none w-full max-w-[200px]"
+            title="Circuit Training Modes"
+          >
+            <div className="relative w-28 h-28 sm:w-32 sm:h-32 md:w-36 md:h-36 flex items-center justify-center animate-planet-1">
+              <div className="absolute inset-2 rounded-full bg-amber-500/25 group-hover:bg-amber-500/50 blur-xl transition-all duration-500 -z-10 group-hover:scale-125" />
+              <img
+                src="/planets/planet-1.png"
+                alt="Circuit Training Planet"
+                className="w-full h-full object-contain filter drop-shadow-[0_8px_20px_rgba(0,0,0,0.7)] group-hover:drop-shadow-[0_0_30px_rgba(245,158,11,0.8)] group-hover:scale-110 transition-transform duration-300 select-none pointer-events-none"
+              />
+            </div>
+            <div className="mt-3 flex flex-col items-center text-center">
+              <div className="px-3 py-1 rounded-full bg-slate-950/85 border border-amber-500/50 group-hover:border-amber-400 shadow-lg flex items-center gap-1.5 transition-all">
+                <span className="text-sm">⚡</span>
+                <span className="text-xs font-black text-amber-300 group-hover:text-white uppercase tracking-wider font-mono">
+                  CIRCUITS
+                </span>
+              </div>
+              <span className="text-[10px] text-amber-400/90 font-mono font-bold uppercase tracking-widest mt-1">
+                PROTOCOLS
+              </span>
+              <span className="text-[11px] text-slate-400 font-mono mt-0.5 line-clamp-2 leading-tight">
+                Hyper-Tension & Rehab
+              </span>
+            </div>
+          </button>
+
+          {/* Planet 2: Recovery Comparison & Analytics (Vortex Planet) */}
+          <button
+            onClick={() => onNavigate("COMPARISON")}
+            className="group flex flex-col items-center cursor-pointer transition-all duration-300 focus:outline-none w-full max-w-[200px]"
+            title="Recovery Comparison & Analytics"
+          >
+            <div className="relative w-28 h-28 sm:w-32 sm:h-32 md:w-36 md:h-36 flex items-center justify-center animate-planet-4">
+              <div className="absolute inset-2 rounded-full bg-teal-500/25 group-hover:bg-teal-500/50 blur-xl transition-all duration-500 -z-10 group-hover:scale-125" />
+              <img
+                src="/planets/planet-4.png"
+                alt="Recovery Comparison Planet"
+                className="w-full h-full object-contain filter drop-shadow-[0_8px_20px_rgba(0,0,0,0.7)] group-hover:drop-shadow-[0_0_30px_rgba(20,184,166,0.8)] group-hover:scale-110 transition-transform duration-300 select-none pointer-events-none"
+              />
+            </div>
+            <div className="mt-3 flex flex-col items-center text-center">
+              <div className="px-3 py-1 rounded-full bg-slate-950/85 border border-teal-500/50 group-hover:border-teal-400 shadow-lg flex items-center gap-1.5 transition-all">
+                <span className="text-sm">📊</span>
+                <span className="text-xs font-black text-teal-300 group-hover:text-white uppercase tracking-wider font-mono">
+                  RECOVERY
+                </span>
+              </div>
+              <span className="text-[10px] text-teal-400/90 font-mono font-bold uppercase tracking-widest mt-1">
+                DELTAS
+              </span>
+              <span className="text-[11px] text-slate-400 font-mono mt-0.5 line-clamp-2 leading-tight">
+                Baseline vs. Today Curves
+              </span>
+            </div>
+          </button>
+
+          {/* Planet 3: Achievements System (Jupiter Gas Giant) */}
+          <button
+            onClick={() => onNavigate("ACHIEVEMENTS")}
+            className="group flex flex-col items-center cursor-pointer transition-all duration-300 focus:outline-none w-full max-w-[200px]"
+            title="Achievements Showcase"
+          >
+            <div className="relative w-28 h-28 sm:w-32 sm:h-32 md:w-36 md:h-36 flex items-center justify-center animate-planet-5">
+              <div className="absolute inset-2 rounded-full bg-yellow-500/25 group-hover:bg-yellow-500/50 blur-xl transition-all duration-500 -z-10 group-hover:scale-125" />
+              <img
+                src="/planets/planet-5.png"
+                alt="Achievements Planet"
+                className="w-full h-full object-contain filter drop-shadow-[0_8px_20px_rgba(0,0,0,0.7)] group-hover:drop-shadow-[0_0_30px_rgba(234,179,8,0.8)] group-hover:scale-110 transition-transform duration-300 select-none pointer-events-none"
+              />
+            </div>
+            <div className="mt-3 flex flex-col items-center text-center">
+              <div className="px-3 py-1 rounded-full bg-slate-950/85 border border-yellow-500/50 group-hover:border-yellow-400 shadow-lg flex items-center gap-1.5 transition-all">
+                <span className="text-sm">🏆</span>
+                <span className="text-xs font-black text-yellow-300 group-hover:text-white uppercase tracking-wider font-mono">
+                  MEDALS
+                </span>
+              </div>
+              <span className="text-[10px] text-yellow-400/90 font-mono font-bold uppercase tracking-widest mt-1">
+                {unlockedAchievementsCount}/{totalAchievementsCount} UNLOCKED
+              </span>
+              <span className="text-[11px] text-slate-400 font-mono mt-0.5 line-clamp-2 leading-tight">
+                Clinical Milestone Badges
+              </span>
+            </div>
+          </button>
+
+          {/* Planet 4: Clinical Telemetry (Deep Blue / Cyan Star Planet) */}
+          <button
+            onClick={() => onNavigate("TELEMETRY")}
+            className="group flex flex-col items-center cursor-pointer transition-all duration-300 focus:outline-none w-full max-w-[200px]"
+            title="Clinical Telemetry & Raw Data"
+          >
+            <div className="relative w-28 h-28 sm:w-32 sm:h-32 md:w-36 md:h-36 flex items-center justify-center animate-planet-3">
+              <div className="absolute inset-2 rounded-full bg-emerald-500/25 group-hover:bg-emerald-500/50 blur-xl transition-all duration-500 -z-10 group-hover:scale-125" />
+              <img
+                src="/planets/planet-3.png"
+                alt="Clinical Telemetry Planet"
+                className="w-full h-full object-contain filter drop-shadow-[0_8px_20px_rgba(0,0,0,0.7)] group-hover:drop-shadow-[0_0_30px_rgba(16,185,129,0.8)] group-hover:scale-110 transition-transform duration-300 select-none pointer-events-none"
+              />
+            </div>
+            <div className="mt-3 flex flex-col items-center text-center">
+              <div className="px-3 py-1 rounded-full bg-slate-950/85 border border-emerald-500/50 group-hover:border-emerald-400 shadow-lg flex items-center gap-1.5 transition-all">
+                <span className="text-sm">📈</span>
+                <span className="text-xs font-black text-emerald-300 group-hover:text-white uppercase tracking-wider font-mono">
+                  TELEMETRY
+                </span>
+              </div>
+              <span className="text-[10px] text-emerald-400/90 font-mono font-bold uppercase tracking-widest mt-1">
+                RAW DATA
+              </span>
+              <span className="text-[11px] text-slate-400 font-mono mt-0.5 line-clamp-2 leading-tight">
+                Kinematic Angles & CSV
+              </span>
+            </div>
+          </button>
+
+          {/* Planet 5: Camera & Calibration Test (Obsidian Banded Planet) */}
+          <button
+            onClick={() => onNavigate("CAMERA_TEST")}
+            className="group flex flex-col items-center cursor-pointer transition-all duration-300 focus:outline-none w-full max-w-[200px]"
+            title="Camera & Sensor Diagnostics"
+          >
+            <div className="relative w-28 h-28 sm:w-32 sm:h-32 md:w-36 md:h-36 flex items-center justify-center animate-planet-2">
+              <div className="absolute inset-2 rounded-full bg-purple-500/25 group-hover:bg-purple-500/50 blur-xl transition-all duration-500 -z-10 group-hover:scale-125" />
+              <img
+                src="/planets/planet-2.png"
+                alt="Sensor Test Planet"
+                className="w-full h-full object-contain filter drop-shadow-[0_8px_20px_rgba(0,0,0,0.7)] group-hover:drop-shadow-[0_0_30px_rgba(168,85,247,0.8)] group-hover:scale-110 transition-transform duration-300 select-none pointer-events-none"
+              />
+            </div>
+            <div className="mt-3 flex flex-col items-center text-center">
+              <div className="px-3 py-1 rounded-full bg-slate-950/85 border border-purple-500/50 group-hover:border-purple-400 shadow-lg flex items-center gap-1.5 transition-all">
+                <span className="text-sm">📷</span>
+                <span className="text-xs font-black text-purple-300 group-hover:text-white uppercase tracking-wider font-mono">
+                  SENSORS
+                </span>
+              </div>
+              <span className="text-[10px] text-purple-400/90 font-mono font-bold uppercase tracking-widest mt-1">
+                SENSOR TEST
+              </span>
+              <span className="text-[11px] text-slate-400 font-mono mt-0.5 line-clamp-2 leading-tight">
+                Calibration & Reticle
+              </span>
+            </div>
+          </button>
+        </div>
+      </section>
       </main>
 
       {/* Footer System Status */}
