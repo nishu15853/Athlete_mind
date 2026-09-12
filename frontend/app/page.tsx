@@ -1512,6 +1512,12 @@ function CharacterPortrait({
 // ---------------------------------------------------------------------------
 
 export default function AthleteMindPage() {
+  const [hasMounted, setHasMounted] = useState(false);
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
   const [scriptReady, setScriptReady] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
@@ -4164,6 +4170,15 @@ export default function AthleteMindPage() {
       return "Pure hip hinge mechanics: posterior chain load transfer and spinal neutrality verified.";
     }
   };
+
+  if (!hasMounted) {
+    // Render a clean loading or menu shell during initial server SSR
+    return (
+      <div className="min-h-screen bg-slate-950 text-cyan-400 flex items-center justify-center font-mono">
+        INITIALIZING SYSTEM...
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-screen h-screen bg-[#050811] text-white flex flex-col font-mono select-none overflow-hidden">
