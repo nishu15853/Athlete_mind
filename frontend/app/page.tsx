@@ -18,12 +18,18 @@ interface BioEnginePacket {
   status: string;
   phase: string;
   knee_angle: number;
-  hip_angle?: number;
+  hip_angle: number;
   rep_count: number;
-  message: string;
-  damage?: number;
+  hold_time?: number;
   hold_progress?: number;
+  damage?: number;
+  damage_taken?: number;
   purity?: number;
+  knee_caved_in?: boolean;
+  valgus?: boolean;
+  weapon_overheated?: boolean;
+  error?: string;
+  message: string;
   is_critical?: boolean;
 }
 
@@ -35,6 +41,18 @@ interface Particle {
   color: string;
   radius: number;
   alpha: number;
+  life: number;
+  maxLife: number;
+}
+
+interface FloatingText {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  color: string;
+  fontSize: number;
+  opacity: number;
   life: number;
   maxLife: number;
 }
@@ -59,6 +77,29 @@ class AudioSynth {
     }
   }
 
+  playHoldTick(progress: number) {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      const baseFreq = 300 + Math.min(1.0, progress) * 450;
+      osc.frequency.setValueAtTime(baseFreq, this.ctx.currentTime);
+
+      gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.08);
+    } catch {
+      // Audio policy safe
+    }
+  }
+
   playCritHit() {
     if (this.muted) return;
     try {
@@ -66,37 +107,59 @@ class AudioSynth {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
 
-      // Punchy sub-bass sweep
+      // Heavy sub-bass impact
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sawtooth";
       osc.frequency.setValueAtTime(220, now);
-      osc.frequency.exponentialRampToValueAtTime(50, now + 0.25);
+      osc.frequency.exponentialRampToValueAtTime(45, now + 0.35);
 
-      gain.gain.setValueAtTime(0.3, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
       osc.connect(gain);
       gain.connect(this.ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.25);
+      osc.stop(now + 0.35);
 
-      // Sci-fi high ping
+      // Cyber laser chime
       const ping = this.ctx.createOscillator();
       const pingGain = this.ctx.createGain();
       ping.type = "sine";
       ping.frequency.setValueAtTime(880, now);
-      ping.frequency.exponentialRampToValueAtTime(1760, now + 0.15);
+      ping.frequency.exponentialRampToValueAtTime(1760, now + 0.18);
 
-      pingGain.gain.setValueAtTime(0.15, now);
-      pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-
+      pingGain.gain.setValueAtTime(0.2, now);
+      pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
       ping.connect(pingGain);
       pingGain.connect(this.ctx.destination);
       ping.start(now);
-      ping.stop(now + 0.15);
+      ping.stop(now + 0.18);
     } catch {
-      // Audio policy safe
+      // noop
+    }
+  }
+
+  playStun() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(110, now);
+      osc.frequency.setValueAtTime(80, now + 0.15);
+
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } catch {
+      // noop
     }
   }
 }
@@ -104,42 +167,56 @@ class AudioSynth {
 const synth = new AudioSynth();
 
 // ---------------------------------------------------------------------------
-// Phase 1: The Bio-Engine Main Component
+// Phase 2: "AI Must Matter" Main Component
 // ---------------------------------------------------------------------------
 
-export default function Phase1BioEnginePage() {
+export default function Phase2BioBountyPage() {
   const [scriptReady, setScriptReady] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
-  // Live Kinematic Telemetry
-  const [kneeAngle, setKneeAngle] = useState(180);
+  // Phase 2 Dynamic Game State
   const [repCount, setRepCount] = useState(0);
-  const [status, setStatus] = useState<string>("TRACKING");
-  const [message, setMessage] = useState<string>("INITIALIZING CAMERA FEED...");
-  const [isCritical, setIsCritical] = useState<boolean>(false);
+  const [formPurity, setFormPurity] = useState(100);
+  const [kneeAngle, setKneeAngle] = useState(180);
+  const [hipAngle, setHipAngle] = useState(180);
+  const [holdProgress, setHoldProgress] = useState(0);
+
+  // Combat Health & Banner State
+  const [playerHp, setPlayerHp] = useState(100);
+  const [bossHp, setBossHp] = useState(500);
+  const [combatBanner, setCombatBanner] = useState("WAITING");
+  const [combatBannerType, setCombatBannerType] = useState<"WAITING" | "HOLD" | "CRIT" | "EGO_LIFT" | "VALGUS">("WAITING");
+  const [isStunned, setIsStunned] = useState(false);
 
   // DOM References
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Engine Refs (preventing React re-render bottlenecks)
+  // High-Frequency State in Refs (preventing React re-render thrashing)
   const landmarksRef = useRef<any>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const poseInstanceRef = useRef<any>(null);
   const isProcessingPoseRef = useRef(false);
   const animFrameIdRef = useRef<number | null>(null);
   const particlesRef = useRef<Particle[]>([]);
+  const floatingTextsRef = useRef<FloatingText[]>([]);
+  const screenShakeRef = useRef(0);
+  const lastHoldTickTimeRef = useRef(0);
+
+  // Mirrored Refs for 60fps canvas pass
   const kneeAngleRef = useRef(180);
+  const holdProgressRef = useRef(0);
+  const isStunnedRef = useRef(false);
   const isCriticalRef = useRef(false);
 
   // Spawn visual neon particles on critical hit
   const spawnParticles = useCallback((cx: number, cy: number, count = 25, color = "#00f0ff") => {
     for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
-      const speed = 2.0 + Math.random() * 4.5;
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
+      const speed = 2.5 + Math.random() * 5.0;
       particlesRef.current.push({
         x: cx,
         y: cy,
@@ -149,21 +226,45 @@ export default function Phase1BioEnginePage() {
         radius: 2.5 + Math.random() * 2.5,
         alpha: 1.0,
         life: 0,
-        maxLife: 25 + Math.random() * 15,
+        maxLife: 28 + Math.random() * 15,
       });
     }
   }, []);
 
-  // Reset Session Reps
+  // Spawn floating combat damage numbers
+  const spawnFloatingText = useCallback((text: string, x: number, y: number, color = "#ffd700", fontSize = 28) => {
+    floatingTextsRef.current.push({
+      id: Math.random().toString(),
+      text,
+      x,
+      y,
+      color,
+      fontSize,
+      opacity: 1.0,
+      life: 0,
+      maxLife: 45,
+    });
+  }, []);
+
+  // Reset Fight Session
   const handleResetSession = useCallback(() => {
     setRepCount(0);
+    setFormPurity(100);
     setKneeAngle(180);
-    setStatus("TRACKING");
-    setMessage("READY • SQUAT DOWN");
-    setIsCritical(false);
+    setHipAngle(180);
+    setHoldProgress(0);
+    setPlayerHp(100);
+    setBossHp(500);
+    setCombatBanner("READY • SQUAT DOWN");
+    setCombatBannerType("WAITING");
+    setIsStunned(false);
+
     kneeAngleRef.current = 180;
+    holdProgressRef.current = 0;
+    isStunnedRef.current = false;
     isCriticalRef.current = false;
     particlesRef.current = [];
+    floatingTextsRef.current = [];
 
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ action: "reset" }));
@@ -176,7 +277,7 @@ export default function Phase1BioEnginePage() {
   };
 
   // ---------------------------------------------------------------------------
-  // Canvas Render Loop (Decoupled, Zero-Flicker)
+  // Canvas Render Loop (Decoupled, Zero-Flicker Hardware Pipeline)
   // ---------------------------------------------------------------------------
 
   const renderCanvasPass = useCallback(() => {
@@ -191,9 +292,16 @@ export default function Phase1BioEnginePage() {
 
     ctx.clearRect(0, 0, width, height);
 
-    // 1. Draw Mirrored Webcam Video
+    // 1. Draw Mirrored Webcam Video with Screen Shake on Hit/Stun
     if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       ctx.save();
+      if (screenShakeRef.current > 0) {
+        const dx = (Math.random() - 0.5) * screenShakeRef.current;
+        const dy = (Math.random() - 0.5) * screenShakeRef.current;
+        ctx.translate(dx, dy);
+        screenShakeRef.current *= 0.86;
+        if (screenShakeRef.current < 0.5) screenShakeRef.current = 0;
+      }
       ctx.translate(width, 0);
       ctx.scale(-1, 1);
       ctx.drawImage(video, 0, 0, width, height);
@@ -217,7 +325,7 @@ export default function Phase1BioEnginePage() {
     // 2. Corner Sci-Fi Tech Brackets
     ctx.strokeStyle = "rgba(0, 240, 255, 0.4)";
     ctx.lineWidth = 2;
-    const bSize = 20;
+    const bSize = 22;
     // Top-Left
     ctx.beginPath();
     ctx.moveTo(14, 14 + bSize);
@@ -243,7 +351,7 @@ export default function Phase1BioEnginePage() {
     ctx.lineTo(width - 14, height - 14 - bSize);
     ctx.stroke();
 
-    // 3. Draw Kinetic Skeleton (Left Hip, Knee, Ankle + Upper Body)
+    // 3. Draw Kinetic Laser Skeleton
     const landmarks = landmarksRef.current;
     if (landmarks && Array.isArray(landmarks) && landmarks.length >= 29) {
       const getPt = (idx: number) => {
@@ -255,14 +363,18 @@ export default function Phase1BioEnginePage() {
         };
       };
 
+      const lSh = getPt(11);
+      const rSh = getPt(12);
+      const lEl = getPt(13);
+      const rEl = getPt(14);
+      const lWr = getPt(15);
+      const rWr = getPt(16);
       const lHip = getPt(23);
       const rHip = getPt(24);
       const lKnee = getPt(25);
       const rKnee = getPt(26);
       const lAnk = getPt(27);
       const rAnk = getPt(28);
-      const lSh = getPt(11);
-      const rSh = getPt(12);
 
       const drawBone = (p1: any, p2: any, color = "#00f0ff", lineWidth = 3.5) => {
         if (!p1 || !p2) return;
@@ -279,33 +391,44 @@ export default function Phase1BioEnginePage() {
         ctx.restore();
       };
 
-      const boneColor = isCriticalRef.current ? "#ffd700" : "#00f0ff";
+      const baseSkeletonColor = isStunnedRef.current ? "#ff0055" : "#00f0ff";
+      const legColor = isStunnedRef.current
+        ? "#ff0055"
+        : holdProgressRef.current > 0
+        ? "#ffd700"
+        : "#00f0ff";
 
-      // Draw Spine & Torso
+      // Upper Body
+      drawBone(lSh, rSh, baseSkeletonColor, 3.5);
+      drawBone(lSh, lEl, baseSkeletonColor, 2.5);
+      drawBone(lEl, lWr, baseSkeletonColor, 2.5);
+      drawBone(rSh, rEl, baseSkeletonColor, 2.5);
+      drawBone(rEl, rWr, baseSkeletonColor, 2.5);
+
+      // Spine & Pelvis
       if (lSh && rSh && lHip && rHip) {
-        drawBone(lSh, rSh, "#00f0ff", 3);
         const midSh = { x: (lSh.x + rSh.x) / 2, y: (lSh.y + rSh.y) / 2 };
         const midHip = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
-        drawBone(midSh, midHip, "#00f0ff", 3.5);
-        drawBone(lHip, rHip, "#00f0ff", 3.5);
+        drawBone(midSh, midHip, baseSkeletonColor, 4.0);
+        drawBone(lHip, rHip, baseSkeletonColor, 4.0);
       }
 
-      // Draw Lower Kinetic Chain (Hip -> Knee -> Ankle)
-      drawBone(lHip, lKnee, boneColor, 4.5);
-      drawBone(lKnee, lAnk, boneColor, 4.5);
-      drawBone(rHip, rKnee, boneColor, 4.5);
-      drawBone(rKnee, rAnk, boneColor, 4.5);
+      // Lower Kinetic Chain (Hips -> Knees -> Ankles)
+      drawBone(lHip, lKnee, legColor, 4.5);
+      drawBone(lKnee, lAnk, legColor, 4.5);
+      drawBone(rHip, rKnee, legColor, 4.5);
+      drawBone(rKnee, rAnk, legColor, 4.5);
 
-      // Draw Joint Halos
+      // Joint Halos
       const joints = [
-        { pt: lSh, r: 5, col: "#00f0ff" },
-        { pt: rSh, r: 5, col: "#00f0ff" },
-        { pt: lHip, r: 6, col: "#00f0ff" },
-        { pt: rHip, r: 6, col: "#00f0ff" },
-        { pt: lKnee, r: 7, col: boneColor },
-        { pt: rKnee, r: 7, col: boneColor },
-        { pt: lAnk, r: 5, col: "#00f0ff" },
-        { pt: rAnk, r: 5, col: "#00f0ff" },
+        { pt: lSh, r: 5, col: baseSkeletonColor },
+        { pt: rSh, r: 5, col: baseSkeletonColor },
+        { pt: lHip, r: 6, col: baseSkeletonColor },
+        { pt: rHip, r: 6, col: baseSkeletonColor },
+        { pt: lKnee, r: 7, col: legColor },
+        { pt: rKnee, r: 7, col: legColor },
+        { pt: lAnk, r: 5, col: baseSkeletonColor },
+        { pt: rAnk, r: 5, col: baseSkeletonColor },
       ];
 
       joints.forEach(({ pt, r, col }) => {
@@ -323,16 +446,36 @@ export default function Phase1BioEnginePage() {
         ctx.restore();
       });
 
-      // Joint Angle Readout on Active Knee
+      // Clinical Hold Arc around active knee
       const activeKnee = lKnee || rKnee;
-      if (activeKnee) {
+      if (activeKnee && holdProgressRef.current > 0) {
+        const radius = 30;
+        const progress = Math.min(1.0, holdProgressRef.current);
+        const startAngle = -Math.PI / 2;
+        const endAngle = startAngle + Math.PI * 2 * progress;
+
         ctx.save();
+        // Track background
+        ctx.beginPath();
+        ctx.arc(activeKnee.x, activeKnee.y, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        // Glowing progress arc
+        ctx.beginPath();
+        ctx.arc(activeKnee.x, activeKnee.y, radius, startAngle, endAngle);
+        ctx.strokeStyle = "#ffd700";
+        ctx.lineWidth = 5;
+        ctx.shadowColor = "#ffd700";
+        ctx.shadowBlur = 14;
+        ctx.stroke();
+
+        // Numeric degree readout
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 14px monospace";
+        ctx.font = "bold 13px monospace";
         ctx.textAlign = "center";
-        ctx.shadowColor = boneColor;
-        ctx.shadowBlur = 8;
-        ctx.fillText(`${Math.round(kneeAngleRef.current)}°`, activeKnee.x, activeKnee.y - 18);
+        ctx.fillText(`${Math.round(kneeAngleRef.current)}°`, activeKnee.x, activeKnee.y - radius - 6);
         ctx.restore();
       }
     }
@@ -343,6 +486,7 @@ export default function Phase1BioEnginePage() {
       const p = particles[i];
       p.x += p.vx;
       p.y += p.vy;
+      p.vy += 0.1; // gravity
       p.life++;
       p.alpha = Math.max(0, 1.0 - p.life / p.maxLife);
 
@@ -359,6 +503,30 @@ export default function Phase1BioEnginePage() {
       ctx.shadowColor = p.color;
       ctx.shadowBlur = 8;
       ctx.fill();
+      ctx.restore();
+    }
+
+    // 5. Update & Render Floating Combat Numbers
+    const texts = floatingTextsRef.current;
+    for (let i = texts.length - 1; i >= 0; i--) {
+      const t = texts[i];
+      t.y -= 1.5;
+      t.life++;
+      t.opacity = Math.max(0, 1.0 - t.life / t.maxLife);
+
+      if (t.opacity <= 0 || t.life >= t.maxLife) {
+        texts.splice(i, 1);
+        continue;
+      }
+
+      ctx.save();
+      ctx.font = `black ${t.fontSize}px monospace`;
+      ctx.fillStyle = t.color;
+      ctx.shadowColor = t.color;
+      ctx.shadowBlur = 12;
+      ctx.globalAlpha = t.opacity;
+      ctx.textAlign = "center";
+      ctx.fillText(t.text, t.x, t.y);
       ctx.restore();
     }
   }, []);
@@ -392,17 +560,19 @@ export default function Phase1BioEnginePage() {
       if (results.poseLandmarks) {
         landmarksRef.current = results.poseLandmarks;
 
-        // Stream Left Hip (23), Knee (25), Ankle (27) to backend WebSocket
+        // Stream Left & Right Hip, Knee, Ankle coordinates to backend WebSocket
         const socket = socketRef.current;
         if (socket && socket.readyState === WebSocket.OPEN) {
           const lms = results.poseLandmarks;
           const payload = {
             left: {
+              shoulder: [lms[11]?.x, lms[11]?.y, lms[11]?.z],
               hip: [lms[23]?.x, lms[23]?.y, lms[23]?.z],
               knee: [lms[25]?.x, lms[25]?.y, lms[25]?.z],
               ankle: [lms[27]?.x, lms[27]?.y, lms[27]?.z],
             },
             right: {
+              shoulder: [lms[12]?.x, lms[12]?.y, lms[12]?.z],
               hip: [lms[24]?.x, lms[24]?.y, lms[24]?.z],
               knee: [lms[26]?.x, lms[26]?.y, lms[26]?.z],
               ankle: [lms[28]?.x, lms[28]?.y, lms[28]?.z],
@@ -420,7 +590,8 @@ export default function Phase1BioEnginePage() {
 
     socket.onopen = () => {
       setWsConnected(true);
-      setMessage("READY • SQUAT DOWN");
+      setCombatBanner("READY • SQUAT DOWN");
+      setCombatBannerType("WAITING");
     };
 
     socket.onclose = () => {
@@ -437,42 +608,93 @@ export default function Phase1BioEnginePage() {
       try {
         const data: BioEnginePacket = JSON.parse(event.data);
 
-        // Update Knee Angle
+        // Update Kinematics
         if (data.knee_angle !== undefined) {
           setKneeAngle(Math.round(data.knee_angle));
           kneeAngleRef.current = data.knee_angle;
         }
 
-        // Update Rep Count
+        if (data.hip_angle !== undefined) {
+          setHipAngle(Math.round(data.hip_angle));
+        }
+
         if (data.rep_count !== undefined) {
           setRepCount(data.rep_count);
         }
 
-        // Update Form Status & Banner
-        if (data.status) {
-          setStatus(data.status);
-          const crit = data.status === "CRITICAL HIT!";
-          setIsCritical(crit);
-          isCriticalRef.current = crit;
+        if (data.purity !== undefined) {
+          setFormPurity(Math.round(data.purity));
+        }
 
-          if (crit && data.event === "HOLD_HIT") {
-            synth.playCritHit();
-            const canvas = canvasRef.current;
-            if (canvas) {
-              spawnParticles(canvas.width / 2, canvas.height * 0.6, 30, "#ffd700");
-            }
+        // Handle Hold Progress & Audio Tick
+        if (data.hold_progress !== undefined) {
+          setHoldProgress(data.hold_progress);
+          holdProgressRef.current = data.hold_progress;
+
+          if (data.hold_progress > 0 && Date.now() - lastHoldTickTimeRef.current >= 280) {
+            synth.playHoldTick(data.hold_progress);
+            lastHoldTickTimeRef.current = Date.now();
           }
         }
 
-        if (data.message) {
-          setMessage(data.message);
+        // Handle Ego Lift Stun Penalty (-25 HP)
+        if (data.status === "penalty" || data.phase === "STUNNED" || (data.damage_taken && data.damage_taken > 0)) {
+          setIsStunned(true);
+          isStunnedRef.current = true;
+          isCriticalRef.current = false;
+          setCombatBanner("EGO LIFT DETECTED - STUNNED!");
+          setCombatBannerType("EGO_LIFT");
+
+          if (data.damage_taken && data.damage_taken > 0) {
+            synth.playStun();
+            screenShakeRef.current = 16;
+            setPlayerHp((prev) => Math.max(0, prev - data.damage_taken!));
+            const canvas = canvasRef.current;
+            if (canvas) {
+              spawnFloatingText(`-${data.damage_taken} HP STUN`, canvas.width / 2, canvas.height / 2 + 50, "#ff0055", 32);
+            }
+          }
+        } else if (data.status === "hit" || data.event === "HOLD_HIT" || data.event === "REP_COMPLETE") {
+          setIsStunned(false);
+          isStunnedRef.current = false;
+          isCriticalRef.current = true;
+          setCombatBanner("CRITICAL HIT!");
+          setCombatBannerType("CRIT");
+
+          if (data.damage && data.damage > 0) {
+            synth.playCritHit();
+            screenShakeRef.current = 14;
+            setBossHp((prev) => Math.max(0, prev - data.damage!));
+            const canvas = canvasRef.current;
+            if (canvas) {
+              spawnParticles(canvas.width / 2, canvas.height * 0.6, 28, "#ffd700");
+              spawnFloatingText(`-100 CRIT!`, canvas.width / 2, canvas.height * 0.4, "#ffd700", 34);
+            }
+          }
+        } else if (data.phase === "HOLDING") {
+          setIsStunned(false);
+          isStunnedRef.current = false;
+          isCriticalRef.current = false;
+          setCombatBanner(`HOLD SQUAT... (${(data.hold_time || 0).toFixed(1)}s / 1.5s)`);
+          setCombatBannerType("HOLD");
+        } else if (data.knee_caved_in || data.valgus) {
+          setIsStunned(false);
+          isStunnedRef.current = false;
+          setCombatBanner("KNEES CAVING INWARD - DRIVE KNEES OUT");
+          setCombatBannerType("VALGUS");
+        } else {
+          setIsStunned(false);
+          isStunnedRef.current = false;
+          isCriticalRef.current = false;
+          setCombatBanner(data.message || "READY • SQUAT DOWN");
+          setCombatBannerType("WAITING");
         }
       } catch (err) {
         console.error("Packet parse error:", err);
       }
     };
 
-    // 3. Initialize Webcam Stream & Non-blocking Render Loop
+    // 3. Initialize Webcam Stream & Render Loop
     const startCamera = async () => {
       try {
         let stream = streamRef.current;
@@ -501,10 +723,8 @@ export default function Phase1BioEnginePage() {
         const loop = async () => {
           if (!isRunning) return;
 
-          // Render canvas pass
           renderCanvasPass();
 
-          // Non-blocking pose submission
           if (
             videoRef.current &&
             videoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
@@ -550,7 +770,10 @@ export default function Phase1BioEnginePage() {
         socket.close();
       }
     };
-  }, [scriptReady, renderCanvasPass, spawnParticles]);
+  }, [scriptReady, renderCanvasPass, spawnParticles, spawnFloatingText]);
+
+  // Visual Form Purity Color Helper
+  const purityColor = formPurity >= 90 ? "text-emerald-400" : formPurity >= 70 ? "text-amber-400" : "text-rose-500";
 
   return (
     <div className="relative w-screen h-screen bg-[#050811] text-white flex flex-col font-mono select-none overflow-hidden">
@@ -565,22 +788,34 @@ export default function Phase1BioEnginePage() {
       <video ref={videoRef} className="hidden" playsInline muted autoPlay />
 
       {/* ------------------------------------------------------------------- */}
-      {/* 1. TOP BAR: BIO-ENGINE TELEMETRY HEADER                            */}
+      {/* 1. TOP BAR: COMBAT HUD TELEMETRY                                   */}
       {/* ------------------------------------------------------------------- */}
       <header className="relative z-20 flex items-center justify-between px-6 py-3 bg-[#0a0f1d]/90 border-b border-cyan-500/20 backdrop-blur-md">
-        {/* Left: Branding & Status */}
-        <div className="flex items-center gap-3">
+        {/* Left: Player HP (100 Max) */}
+        <div className="flex items-center gap-4 w-72">
           <div className="w-10 h-10 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 text-lg shadow-[0_0_12px_rgba(6,182,212,0.25)]">
-            ⚡
+            🛡️
           </div>
-          <div>
-            <div className="text-sm font-black tracking-widest text-cyan-300">ATHLETEMIND</div>
-            <div className="text-[10px] text-slate-400 font-semibold tracking-wider">PHASE 1 • THE BIO-ENGINE</div>
+          <div className="flex-1">
+            <div className="flex justify-between text-xs font-bold tracking-wider text-cyan-300 mb-1">
+              <span>PLAYER HEALTH</span>
+              <span>{playerHp} / 100 HP</span>
+            </div>
+            <div className="h-3 w-full bg-slate-800/90 rounded-full overflow-hidden p-0.5 border border-cyan-500/30">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  playerHp > 40
+                    ? "bg-gradient-to-r from-cyan-500 to-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
+                    : "bg-gradient-to-r from-rose-600 to-amber-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.7)]"
+                }`}
+                style={{ width: `${Math.max(0, Math.min(100, playerHp))}%` }}
+              />
+            </div>
           </div>
         </div>
 
-        {/* Center: Live Kinetic Readouts */}
-        <div className="flex items-center gap-6">
+        {/* Center: Live Rep Counter & Form Purity */}
+        <div className="flex items-center gap-8">
           {/* Rep Counter */}
           <div className="text-center px-5 py-1 rounded-xl bg-black/50 border border-cyan-500/30 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
             <div className="text-[10px] text-cyan-400 font-semibold tracking-widest uppercase">Repetitions</div>
@@ -589,43 +824,40 @@ export default function Phase1BioEnginePage() {
             </div>
           </div>
 
-          {/* Knee Angle Live */}
-          <div className="text-center px-4 py-1 rounded-xl bg-black/50 border border-slate-700/50">
-            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Knee Angle</div>
-            <div className="text-2xl font-black text-white font-mono tracking-tight">
-              {kneeAngle}°
+          {/* Form Purity Metric */}
+          <div className="text-center px-5 py-1 rounded-xl bg-black/50 border border-cyan-500/30">
+            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Form Purity</div>
+            <div className={`text-2xl font-black ${purityColor} tracking-tight drop-shadow`}>
+              {formPurity}%
             </div>
           </div>
 
-          {/* Form Status Badge */}
+          {/* Knee & Hip Angle Live */}
           <div className="text-center px-4 py-1 rounded-xl bg-black/50 border border-slate-700/50">
-            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Engine Status</div>
-            <div className={`text-base font-black tracking-wide ${isCritical ? "text-amber-300 animate-pulse" : "text-cyan-400"}`}>
-              {status}
+            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Angles (Knee / Hip)</div>
+            <div className="text-lg font-bold text-slate-200 tracking-tight font-mono">
+              {kneeAngle}° / {hipAngle}°
             </div>
           </div>
         </div>
 
-        {/* Right: Controls & Network Status */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 border border-slate-700 text-xs">
-            <span className={`w-2 h-2 rounded-full ${wsConnected ? "bg-emerald-400 animate-pulse" : "bg-rose-500"}`} />
-            <span className="text-slate-300 font-bold">{wsConnected ? "ENGINE ONLINE" : "OFFLINE"}</span>
+        {/* Right: Boss HP (500 Max) */}
+        <div className="flex items-center gap-4 w-80 justify-end">
+          <div className="flex-1 text-right">
+            <div className="flex justify-between text-xs font-bold tracking-wider text-rose-400 mb-1">
+              <span className="truncate">CYBER-COLOSSUS</span>
+              <span>{bossHp} / 500 HP</span>
+            </div>
+            <div className="h-3 w-full bg-slate-800/90 rounded-full overflow-hidden p-0.5 border border-rose-500/30">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-amber-500 via-rose-500 to-red-600 transition-all duration-300 shadow-[0_0_12px_rgba(244,63,94,0.6)]"
+                style={{ width: `${Math.max(0, Math.min(100, (bossHp / 500) * 100))}%` }}
+              />
+            </div>
           </div>
-
-          <button
-            onClick={handleToggleMute}
-            className="px-3 py-1.5 rounded-xl bg-black/60 hover:bg-black/90 border border-slate-700 hover:border-cyan-400 text-xs text-slate-300 transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <span>{isMuted ? "🔇 MUTED" : "🔊 AUDIO"}</span>
-          </button>
-
-          <button
-            onClick={handleResetSession}
-            className="px-3 py-1.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/40 hover:border-cyan-400 text-xs text-cyan-300 font-bold transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <span>🔄 RESET</span>
-          </button>
+          <div className="w-10 h-10 rounded-xl bg-rose-950/80 border border-rose-500/40 flex items-center justify-center text-rose-400 text-lg shadow-[0_0_12px_rgba(244,63,94,0.3)]">
+            👾
+          </div>
         </div>
       </header>
 
@@ -634,7 +866,7 @@ export default function Phase1BioEnginePage() {
       {/* ------------------------------------------------------------------- */}
       <main className="relative flex-1 w-full h-full flex items-center justify-center p-4 bg-gradient-to-b from-[#050811] via-[#080d1a] to-[#04060d]">
         <div className="relative w-full max-w-5xl aspect-[4/3] max-h-[80vh] rounded-3xl overflow-hidden border-2 border-cyan-500/30 shadow-[0_0_50px_rgba(0,240,255,0.12)] bg-black">
-          {/* Decoupled Canvas Video & Skeleton Render Surface */}
+          {/* Hardware Render Canvas */}
           <canvas
             ref={canvasRef}
             width={640}
@@ -642,29 +874,71 @@ export default function Phase1BioEnginePage() {
             className="w-full h-full object-cover"
           />
 
-          {/* Dynamic Floating Combat Callout Banner */}
+          {/* Dynamic Center Combat Feedback Banner */}
           <div className="absolute top-6 left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">
             <div
               className={`px-8 py-3 rounded-2xl border-2 backdrop-blur-md transition-all duration-200 uppercase font-black tracking-widest text-sm sm:text-base flex items-center gap-3 shadow-2xl ${
-                isCritical
-                  ? "bg-amber-950/90 border-amber-400 text-amber-200 shadow-[0_0_35px_rgba(251,191,36,0.7)] scale-105"
-                  : "bg-slate-900/80 border-cyan-500/40 text-cyan-300 shadow-lg"
+                combatBannerType === "EGO_LIFT"
+                  ? "bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_35px_rgba(244,63,94,0.7)] animate-bounce"
+                  : combatBannerType === "CRIT"
+                  ? "bg-emerald-950/90 border-emerald-400 text-emerald-200 shadow-[0_0_35px_rgba(52,211,153,0.7)] scale-105"
+                  : combatBannerType === "HOLD"
+                  ? "bg-cyan-950/90 border-cyan-400 text-cyan-200 shadow-[0_0_25px_rgba(6,182,212,0.5)]"
+                  : combatBannerType === "VALGUS"
+                  ? "bg-amber-950/90 border-amber-500 text-amber-200 shadow-[0_0_25px_rgba(245,158,11,0.5)]"
+                  : "bg-slate-900/80 border-slate-700 text-slate-300 shadow-lg"
               }`}
             >
-              <span>{isCritical ? "💥" : "🎯"}</span>
-              <span>{message}</span>
+              <span>
+                {combatBannerType === "EGO_LIFT"
+                  ? "⚠️"
+                  : combatBannerType === "CRIT"
+                  ? "💥"
+                  : combatBannerType === "HOLD"
+                  ? "⏱️"
+                  : combatBannerType === "VALGUS"
+                  ? "⚡"
+                  : "🎯"}
+              </span>
+              <span>{combatBanner}</span>
             </div>
+
+            {/* Hold progress bar under banner */}
+            {holdProgress > 0 && (
+              <div className="w-64 mx-auto mt-2 h-2 bg-slate-900/90 rounded-full overflow-hidden border border-cyan-400/40 p-0.5">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-amber-300 transition-all duration-75 shadow-[0_0_10px_rgba(251,191,36,0.8)]"
+                  style={{ width: `${Math.min(100, holdProgress * 100)}%` }}
+                />
+              </div>
+            )}
           </div>
 
           {/* Viewport Corner Status Footer */}
           <div className="absolute bottom-4 left-6 z-20 flex items-center gap-3 text-xs text-slate-400">
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 border border-slate-700">
               <span className={`w-2 h-2 rounded-full ${cameraActive ? "bg-emerald-400" : "bg-amber-400"}`} />
-              <span>{cameraActive ? "CAMERA ACTIVE (640x480)" : "WAITING FOR CAMERA..."}</span>
+              <span>{cameraActive ? "CAMERA ONLINE (640x480)" : "INITIALIZING CAMERA..."}</span>
             </div>
             <div className="px-3 py-1 rounded-full bg-black/60 border border-slate-700 text-cyan-300">
-              ARCTAN2 BIO-KINEMATICS
+              CLINICAL HOLD: 1.5s - 2.0s
             </div>
+          </div>
+
+          {/* Controls */}
+          <div className="absolute bottom-4 right-6 z-20 flex items-center gap-3">
+            <button
+              onClick={handleToggleMute}
+              className="px-3 py-1.5 rounded-xl bg-black/60 hover:bg-black/90 border border-slate-700 hover:border-cyan-400 text-xs text-slate-300 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <span>{isMuted ? "🔇 MUTED" : "🔊 AUDIO"}</span>
+            </button>
+            <button
+              onClick={handleResetSession}
+              className="px-3 py-1.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/40 hover:border-cyan-400 text-xs text-cyan-300 font-bold transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <span>🔄 RESET</span>
+            </button>
           </div>
         </div>
       </main>
