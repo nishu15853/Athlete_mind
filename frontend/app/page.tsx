@@ -1638,11 +1638,18 @@ export default function Home() {
     }
   }, [currentView, cameraStatus]);
 
-  // Immediate Camera Mount: Stream webcam right away so feed is visible without waiting for CDN/MediaPipe
+  // 1. Isolate the Camera Stream in a Dedicated Ref-Guarded Effect
   useEffect(() => {
     let isRunning = true;
     const initWebcam = async () => {
-      if (streamRef.current) return;
+      if (streamRef.current && streamRef.current.active) {
+        if (videoRef.current && videoRef.current.srcObject !== streamRef.current) {
+          videoRef.current.srcObject = streamRef.current;
+          videoRef.current.play().catch(console.error);
+        }
+        return;
+      }
+
       try {
         setCameraStatus("INITIALIZING");
         setCameraError(null);
@@ -1676,8 +1683,14 @@ export default function Home() {
       }
     };
     initWebcam();
+
+    // 4. Cleanup Safeguard: Stop all media tracks only when the component truly unmounts
     return () => {
       isRunning = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
     };
   }, []);
 
@@ -2438,6 +2451,11 @@ export default function Home() {
         }
 
         if (ctx && canvas) {
+          // Apply horizontal flip to match video mirroring:
+          ctx.save();
+          ctx.scale(-1, 1);
+          ctx.translate(-canvas.width, 0);
+
           drawVisuals(
             ctx,
             canvas.width,
@@ -2460,86 +2478,45 @@ export default function Home() {
             isClashActiveRef.current,
             clashProgressRef.current
           );
+
+          ctx.restore();
         }
       }
     });
 
+    // 2. Decouple Pose Inference from the Render Loop
     let isRunning = true;
-    let localStream: MediaStream | null = null;
+    let isProcessing = false;
+    let animationFrameId: number;
 
-    const startCamera = async () => {
-      try {
-        let stream = streamRef.current;
-        if (!stream) {
-          setCameraStatus("INITIALIZING");
-          setCameraError(null);
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
-              audio: false,
-            });
-          } catch {
-            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-          }
-          if (!isRunning) {
-            stream.getTracks().forEach((t) => t.stop());
-            return;
-          }
-          streamRef.current = stream;
-        }
-        localStream = stream;
-
-        if (videoRef.current) {
-          if (videoRef.current.srcObject !== stream) {
-            videoRef.current.srcObject = stream;
-          }
-          try {
-            await videoRef.current.play();
-          } catch (e) {
-            console.warn("Video play error:", e);
-          }
+    const renderLoop = async () => {
+      if (!isRunning) return;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (video && canvas && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        // Match canvas buffer dimensions once
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth || 640;
+          canvas.height = video.videoHeight || 480;
         }
 
-        setCameraStatus("ACTIVE");
-
-        let isProcessing = false;
-        const processFrame = async () => {
-          if (!isRunning) return;
-          if (
-            videoRef.current &&
-            videoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-            !isProcessing
-          ) {
-            isProcessing = true;
-            try {
-              await pose.send({ image: videoRef.current });
-            } catch (err) {
-              console.error("Frame error:", err);
-            } finally {
-              isProcessing = false;
-            }
-          }
-          if (isRunning) {
-            animationFrameId.current = requestAnimationFrame(processFrame);
-          }
-        };
-        processFrame();
-      } catch (err: unknown) {
-        console.error("Camera access failed:", err);
-        setCameraStatus("ERROR");
-        setCameraError(err instanceof Error ? err.message : "Camera access denied or device busy");
+        // Non-blocking pose submission
+        if (!isProcessing && window.Pose) {
+          isProcessing = true;
+          pose.send({ image: video }).finally(() => {
+            isProcessing = false;
+          });
+        }
+      }
+      if (isRunning) {
+        animationFrameId = requestAnimationFrame(renderLoop);
       }
     };
-
-    startCamera();
+    animationFrameId = requestAnimationFrame(renderLoop);
 
     return () => {
       isRunning = false;
-      if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
-      if (localStream) {
-        localStream.getTracks().forEach((t) => t.stop());
-      }
-      streamRef.current = null;
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
       try { pose.close(); } catch { /* noop */ }
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
     };
@@ -2920,9 +2897,7 @@ export default function Home() {
               />
               <canvas
                 ref={canvasRef}
-                width={640}
-                height={480}
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none scale-x-[-1] z-10"
+                className="absolute inset-0 w-full h-full pointer-events-none z-10"
               />
 
               {/* Camera Status & Reconnect Overlay (Non-blocking, zero pitch-black obstruction) */}
