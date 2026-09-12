@@ -3815,22 +3815,28 @@ export default function AthleteMindPage() {
           setSecondaryAngle(Math.round(currentSecAngle));
         }
 
+        const isCalibratingStage = Boolean(gameStageRef.current?.startsWith("CALIBRATION_"));
+        if (isCalibratingStage || gameStageRef.current !== "ACTIVE_DEFLECTION") {
+          return;
+        }
+
         if (data.rep_count !== undefined) {
           setRepCount(data.rep_count);
 
           // Circuit Mode Automatic Gauntlet Progression (Squats -> Overhead Press)
-          if (
-            activeCircuitModeRef.current === "FULL_BODY" &&
-            circuitStepRef.current === 1 &&
-            data.rep_count >= 5
-          ) {
-            circuitStepRef.current = 2;
-            setCircuitStep(2);
-            setExercise("overhead_press");
-            exerciseRef.current = "overhead_press";
-            speakCoachCue("Squats gauntlet cleared! Transitioning to Stage 2: Overhead Press. Deflect incoming vertical attacks!");
-            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-              socketRef.current.send(JSON.stringify({ action: "set_exercise", exercise: "overhead_press" }));
+            if (
+              activeCircuitModeRef.current === "FULL_BODY" &&
+              circuitStepRef.current === 1 &&
+              data.rep_count >= 5
+            ) {
+              circuitStepRef.current = 2;
+              setCircuitStep(2);
+              setExercise("overhead_press");
+              exerciseRef.current = "overhead_press";
+              speakCoachCue("Squats gauntlet cleared! Transitioning to Stage 2: Overhead Press. Deflect incoming vertical attacks!");
+              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                socketRef.current.send(JSON.stringify({ action: "set_exercise", exercise: "overhead_press" }));
+              }
             }
           }
         }
@@ -4634,13 +4640,13 @@ export default function AthleteMindPage() {
           {/* 2. CALIBRATION_ARMS: Arm Sensor Test */}
           {gameStage === "CALIBRATION_ARMS" && (
             <div className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-between p-6">
-              {/* Floating Prompt Banner */}
-              <div className="w-full max-w-xl px-6 py-3.5 rounded-2xl bg-black/85 border-2 border-cyan-400/80 shadow-[0_0_35px_rgba(0,240,255,0.4)] backdrop-blur-md text-center animate-pulse">
-                <div className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold mb-1">
+              {/* Dedicated Diagnostic Banner */}
+              <div className="w-full max-w-2xl px-8 py-4 rounded-3xl bg-cyan-950/90 border-2 border-cyan-400 shadow-[0_0_40px_rgba(0,240,255,0.5)] backdrop-blur-md text-center animate-pulse">
+                <div className="text-xs font-mono uppercase tracking-widest text-cyan-400 font-bold mb-1">
                   CALIBRATION PHASE 1/3 • ARM SENSOR TEST
                 </div>
-                <div className="text-sm sm:text-base font-black font-mono uppercase tracking-wider text-white">
-                  RAISE BOTH HANDS ABOVE SHOULDERS TO CALIBRATE RANGE
+                <div className="text-lg sm:text-2xl font-black font-mono uppercase tracking-wider text-cyan-300 drop-shadow-[0_0_20px_rgba(0,240,255,0.8)]">
+                  CALIBRATION: RAISE BOTH ARMS ABOVE SHOULDERS
                 </div>
               </div>
 
@@ -4662,25 +4668,25 @@ export default function AthleteMindPage() {
           {/* 3. CALIBRATION_STANCE: Full Body Framing */}
           {gameStage === "CALIBRATION_STANCE" && (
             <div className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-between p-6">
-              {/* Floating Prompt Banner */}
-              <div className="w-full max-w-xl px-6 py-3.5 rounded-2xl bg-black/85 border-2 border-emerald-400/80 shadow-[0_0_35px_rgba(16,185,129,0.4)] backdrop-blur-md text-center">
-                <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-1">
+              {/* Dedicated Diagnostic Banner */}
+              <div className="w-full max-w-2xl px-8 py-4 rounded-3xl bg-amber-950/90 border-2 border-amber-400 shadow-[0_0_40px_rgba(245,158,11,0.5)] backdrop-blur-md text-center">
+                <div className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold mb-1">
                   CALIBRATION PHASE 2/3 • FULL BODY FRAMING
                 </div>
-                <div className="text-sm sm:text-base font-black font-mono uppercase tracking-wider text-white">
-                  STEP BACK UNTIL HIPS AND ANKLES ARE VISIBLE
+                <div className="text-lg sm:text-2xl font-black font-mono uppercase tracking-wider text-amber-300 drop-shadow-[0_0_20px_rgba(245,158,11,0.8)]">
+                  CALIBRATION: STEP BACK UNTIL HIPS & ANKLES ARE VISIBLE
                 </div>
               </div>
 
               {/* Full Body Framing Status Chips */}
-              <div className="flex items-center gap-4 px-5 py-2.5 rounded-2xl bg-black/80 border border-emerald-500/40 backdrop-blur-md">
+              <div className="flex items-center gap-4 px-5 py-2.5 rounded-2xl bg-black/80 border border-amber-500/40 backdrop-blur-md">
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all ${
                   stanceCalibrationVerified ? "bg-emerald-950/80 border-emerald-400 text-emerald-300" : "bg-slate-900 border-slate-700 text-slate-400"
                 }`}>
                   <span>{stanceCalibrationVerified ? "✅" : "⏳"}</span>
                   <span>HIPS & ANKLES IN FRAME</span>
                 </div>
-                <div className="text-[11px] text-emerald-400 font-mono">
+                <div className="text-[11px] text-amber-400 font-mono">
                   ALIGN LOWER BODY IN CAMERA
                 </div>
               </div>
@@ -4690,25 +4696,25 @@ export default function AthleteMindPage() {
           {/* 4. CALIBRATION_SHIELD: Squat Shield Activation Test */}
           {gameStage === "CALIBRATION_SHIELD" && (
             <div className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-between p-6">
-              {/* Floating Prompt Banner */}
-              <div className="w-full max-w-xl px-6 py-3.5 rounded-2xl bg-black/85 border-2 border-amber-400/80 shadow-[0_0_35px_rgba(245,158,11,0.4)] backdrop-blur-md text-center">
-                <div className="text-[10px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-1">
+              {/* Dedicated Diagnostic Banner */}
+              <div className="w-full max-w-2xl px-8 py-4 rounded-3xl bg-emerald-950/90 border-2 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.5)] backdrop-blur-md text-center">
+                <div className="text-xs font-mono uppercase tracking-widest text-emerald-400 font-bold mb-1">
                   CALIBRATION PHASE 3/3 • SHIELD ACTIVATION
                 </div>
-                <div className="text-sm sm:text-base font-black font-mono uppercase tracking-wider text-white">
-                  TEST SQUAT SHIELD: LOWER TO 90° AND HOLD FOR 1.5 SECONDS
+                <div className="text-lg sm:text-2xl font-black font-mono uppercase tracking-wider text-emerald-300 drop-shadow-[0_0_20px_rgba(16,185,129,0.8)]">
+                  TEST SQUAT: HOLD DEPTH FOR 1.5s TO PRIME SHIELD
                 </div>
               </div>
 
               {/* Shield Hold Meter */}
-              <div className="w-full max-w-md p-4 rounded-2xl bg-black/85 border border-amber-500/50 backdrop-blur-md flex flex-col items-center">
-                <div className="flex justify-between w-full text-xs font-mono font-bold text-amber-300 mb-1.5">
+              <div className="w-full max-w-md p-4 rounded-2xl bg-black/85 border border-emerald-500/50 backdrop-blur-md flex flex-col items-center">
+                <div className="flex justify-between w-full text-xs font-mono font-bold text-emerald-300 mb-1.5">
                   <span>⬡ SHIELD MATRIX CHARGE</span>
                   <span>{Math.round(shieldTestHoldProgress * 100)}%</span>
                 </div>
-                <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-amber-500/30 p-0.5 mb-2">
+                <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-emerald-500/30 p-0.5 mb-2">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-75 shadow-[0_0_12px_rgba(245,158,11,0.8)]"
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300 transition-all duration-75 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
                     style={{ width: `${Math.max(0, Math.min(100, shieldTestHoldProgress * 100))}%` }}
                   />
                 </div>
@@ -4930,17 +4936,19 @@ export default function AthleteMindPage() {
             </div>
           )}
 
-          {/* Giant Dynamic Center Action Banner (Visible from 8+ Feet Away) */}
-          <GiantActionBanner
-            state={getGiantBannerState()}
-            holdProgress={holdProgress}
-            targetHoldDuration={targetHoldDuration}
-            customMessage={
-              combatBannerType === "EGO_LIFT"
-                ? "EGO LIFT / KNEE CAVE DETECTED"
-                : undefined
-            }
-          />
+          {/* Giant Dynamic Center Action Banner (Strict State-Gated: ACTIVE_DEFLECTION Only) */}
+          {gameStage === "ACTIVE_DEFLECTION" && (
+            <GiantActionBanner
+              state={getGiantBannerState()}
+              holdProgress={holdProgress}
+              targetHoldDuration={targetHoldDuration}
+              customMessage={
+                combatBannerType === "EGO_LIFT"
+                  ? "EGO LIFT / KNEE CAVE DETECTED"
+                  : undefined
+              }
+            />
+          )}
 
           <div className="absolute bottom-4 left-6 z-20 flex items-center gap-2 text-xs text-slate-400">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/70 border border-slate-700/80 backdrop-blur-md">
