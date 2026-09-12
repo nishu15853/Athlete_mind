@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { ClinicalSoapCard } from "./ClinicalSoapCard";
 
 export interface RecoverySession {
   id: string;
@@ -336,6 +337,24 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
             ))}
           </div>
         </div>
+
+        {/* AI Clinical Synthesis (SOAP Note) */}
+        <ClinicalSoapCard
+          callsign="OPERATIVE_01"
+          exercise="squats"
+          repsCompleted={history[history.length - 1]?.repsCompleted || 15}
+          avgDepthAngle={todayDepth}
+          maxHoldDuration={todayHold}
+          valgusEvents={todayValgus}
+          stabilityScore={history[history.length - 1]?.stabilityScore || 97.0}
+          streakDays={history.length}
+          baseline={{
+            avgDepthAngle: baselineSession.avgDepthAngle,
+            maxHoldDuration: baselineSession.maxHoldDuration,
+            valgusEvents: baselineSession.valgusEvents,
+            stabilityScore: baselineSession.stabilityScore,
+          }}
+        />
       </main>
     </div>
   );

@@ -10,6 +10,7 @@ import { ComparisonView } from "@/components/ComparisonView";
 import { AchievementsView, AchievementItem } from "@/components/AchievementsView";
 import { CircuitSelectView, CircuitMode } from "@/components/CircuitSelectView";
 import { SettingsView } from "@/components/SettingsView";
+import { ClinicalSoapCard } from "@/components/ClinicalSoapCard";
 
 // ---------------------------------------------------------------------------
 // Types & Declarations
@@ -1522,6 +1523,19 @@ export default function AthleteMindPage() {
   const [cameraActive, setCameraActive] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [aiAudioGuidance, setAiAudioGuidance] = useState(true);
+  const aiAudioGuidanceRef = useRef(true);
+  const lastFaultTypeRef = useRef<string | null>(null);
+  const faultRepeatCountRef = useRef<number>(0);
+  const lastFaultEpisodeTimeRef = useRef<number>(0);
+  const lastAiCoachCallTimeRef = useRef<number>(0);
+  const recentFaultsListRef = useRef<string[]>([]);
+  const repCountRef = useRef<number>(0);
+  const holdDurationsRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    aiAudioGuidanceRef.current = aiAudioGuidance;
+  }, [aiAudioGuidance]);
 
   // Exercise & Difficulty Configuration
   const [exercise, setExercise] = useState<ExerciseType>("squats");
@@ -1754,6 +1768,14 @@ export default function AthleteMindPage() {
   useEffect(() => {
     circuitStepRef.current = circuitStep;
   }, [circuitStep]);
+
+  useEffect(() => {
+    repCountRef.current = repCount;
+  }, [repCount]);
+
+  useEffect(() => {
+    holdDurationsRef.current = holdDurations;
+  }, [holdDurations]);
 
   // Load vault, callsign, and clinical history on mount
   useEffect(() => {
@@ -3928,6 +3950,55 @@ export default function AthleteMindPage() {
           speakCoachCue(data.audio_cue);
         }
 
+        // Reactive In-Game AI Biomechanical Audio Coach (/api/ai-coach)
+        if (data.has_fault && data.fault_type) {
+          const fKey = data.fault_type.toLowerCase();
+          const now = Date.now();
+          if (!lastFaultEpisodeTimeRef.current || now - lastFaultEpisodeTimeRef.current > 1500) {
+            lastFaultEpisodeTimeRef.current = now;
+            recentFaultsListRef.current.push(fKey);
+            if (recentFaultsListRef.current.length > 10) {
+              recentFaultsListRef.current.shift();
+            }
+
+            if (lastFaultTypeRef.current === fKey) {
+              faultRepeatCountRef.current += 1;
+            } else {
+              lastFaultTypeRef.current = fKey;
+              faultRepeatCountRef.current = 1;
+            }
+
+            if (
+              aiAudioGuidanceRef.current &&
+              faultRepeatCountRef.current >= 2 &&
+              now - lastAiCoachCallTimeRef.current > 6000
+            ) {
+              lastAiCoachCallTimeRef.current = now;
+              faultRepeatCountRef.current = 0;
+              const hd = holdDurationsRef.current;
+              const avgHold = hd.length > 0 ? hd.reduce((a, b) => a + b, 0) / hd.length : 1.5;
+              fetch("/api/ai-coach", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  reps: data.rep_count ?? repCountRef.current,
+                  avgHold: Number(avgHold.toFixed(2)),
+                  faults: [...recentFaultsListRef.current],
+                  currentStage: gameStageRef.current || "ACTIVE_DEFLECTION",
+                  exercise: exerciseRef.current,
+                }),
+              })
+                .then((r) => r.json())
+                .then((resData) => {
+                  if (resData?.cue) {
+                    speakCoachCue(resData.cue);
+                  }
+                })
+                .catch((err) => console.warn("AI coach error:", err));
+            }
+          }
+        }
+
         // Handle Hold Progress & Audio Tick
         if (data.hold_progress !== undefined) {
           setHoldProgress(data.hold_progress);
@@ -3996,6 +4067,10 @@ export default function AthleteMindPage() {
           if (data.event === "REP_COMPLETE") {
             if (data.combo_multiplier && data.combo_multiplier > 1.0) {
               synth.playStreakLevelUp(data.combo_multiplier);
+            }
+            if (!data.has_fault) {
+              lastFaultTypeRef.current = null;
+              faultRepeatCountRef.current = 0;
             }
             const holdDur = Math.max(1.0, data.hold_time || 1.5);
             setHoldDurations((prev) => [...prev, holdDur]);
@@ -4961,6 +5036,17 @@ export default function AthleteMindPage() {
 
           <div className="absolute bottom-4 right-6 z-20 flex items-center gap-2">
             <button
+              onClick={() => setAiAudioGuidance((prev) => !prev)}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md ${
+                aiAudioGuidance
+                  ? "bg-emerald-950/70 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                  : "bg-black/70 hover:bg-black/90 border-slate-700 text-slate-400"
+              }`}
+              title="Toggle Reactive AI Biomechanical Audio Guidance"
+            >
+              <span>{aiAudioGuidance ? "🧠 AI COACH: ON" : "🧠 AI COACH: OFF"}</span>
+            </button>
+            <button
               onClick={handleToggleMute}
               className="px-3 py-1.5 rounded-xl bg-black/70 hover:bg-black/90 border border-slate-700 hover:border-cyan-400 text-xs text-slate-300 font-mono transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
               title="Toggle Audio Feedback"
@@ -5184,6 +5270,36 @@ export default function AthleteMindPage() {
                 </div>
               )}
             </div>
+
+            {/* AI Automated Clinical SOAP Synthesis */}
+            <ClinicalSoapCard
+              callsign={callsign || "OPERATIVE_01"}
+              exercise={exercise}
+              repsCompleted={repCount > 0 ? repCount : (recoveryHistory[recoveryHistory.length - 1]?.repsCompleted || 12)}
+              avgDepthAngle={
+                repCount > 0 && minSessionAngle < 180
+                  ? minSessionAngle
+                  : (recoveryHistory[recoveryHistory.length - 1]?.avgDepthAngle || 88.5)
+              }
+              maxHoldDuration={
+                holdDurations.length > 0
+                  ? Math.max(...holdDurations)
+                  : (recoveryHistory[recoveryHistory.length - 1]?.maxHoldDuration || 2.2)
+              }
+              valgusEvents={
+                repCount > 0
+                  ? valgusCount
+                  : (recoveryHistory[recoveryHistory.length - 1]?.valgusEvents ?? 0)
+              }
+              stabilityScore={formPurity > 0 ? formPurity : 94.0}
+              streakDays={adherence.streakDays}
+              baseline={{
+                avgDepthAngle: baselineSession.avgDepthAngle,
+                maxHoldDuration: baselineSession.maxHoldDuration,
+                valgusEvents: baselineSession.valgusEvents,
+                stabilityScore: baselineSession.stabilityScore,
+              }}
+            />
 
             {/* Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-3 w-full">
@@ -5919,6 +6035,36 @@ export default function AthleteMindPage() {
                 ))}
               </div>
             </div>
+
+            {/* AI Automated Clinical SOAP Synthesis */}
+            <ClinicalSoapCard
+              callsign={callsign || "OPERATIVE_01"}
+              exercise={exercise}
+              repsCompleted={repCount > 0 ? repCount : (recoveryHistory[recoveryHistory.length - 1]?.repsCompleted || 12)}
+              avgDepthAngle={
+                repCount > 0 && minSessionAngle < 180
+                  ? minSessionAngle
+                  : (recoveryHistory[recoveryHistory.length - 1]?.avgDepthAngle || 88.5)
+              }
+              maxHoldDuration={
+                holdDurations.length > 0
+                  ? Math.max(...holdDurations)
+                  : (recoveryHistory[recoveryHistory.length - 1]?.maxHoldDuration || 2.2)
+              }
+              valgusEvents={
+                repCount > 0
+                  ? valgusCount
+                  : (recoveryHistory[recoveryHistory.length - 1]?.valgusEvents ?? 0)
+              }
+              stabilityScore={formPurity > 0 ? formPurity : 94.0}
+              streakDays={adherence.streakDays}
+              baseline={{
+                avgDepthAngle: baselineSession.avgDepthAngle,
+                maxHoldDuration: baselineSession.maxHoldDuration,
+                valgusEvents: baselineSession.valgusEvents,
+                stabilityScore: baselineSession.stabilityScore,
+              }}
+            />
 
             {/* Modal Footer / Telemetry Actions */}
             <div className="flex flex-col sm:flex-row items-center justify-between border-t border-slate-800 pt-4 gap-3">
