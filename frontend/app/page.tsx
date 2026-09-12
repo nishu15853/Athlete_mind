@@ -268,6 +268,22 @@ export interface Shockwave {
   color: string;
 }
 
+export type GameStage = "IDLE" | "CALIBRATING" | "ACTIVE" | "PAUSED" | "COMPLETED";
+
+export interface KineticProjectile {
+  id: string;
+  startX: number;
+  startY: number;
+  targetX: number;
+  targetY: number;
+  progress: number; // 0.0 to 1.0
+  duration: number; // 4000ms
+  spawnTime: number;
+  radius: number;
+  color: string;
+  status: "FLYING" | "DEFLECTED" | "BREACHED";
+}
+
 const DEFAULT_CLINICAL_BADGES: ClinicalBadge[] = [
   {
     id: "tendon_vanguard",
@@ -720,6 +736,93 @@ class AudioSynth {
       // safe
     }
   }
+
+  playCalibrationBeep(isFinal: boolean = false) {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      if (!isFinal) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(660, now);
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.exponentialRampToValueAtTime(0.2, now + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.09);
+      } else {
+        const notes = [523.25, 659.25, 783.99, 1046.5];
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx!.createOscillator();
+          const gain = this.ctx!.createGain();
+          const start = now + idx * 0.055;
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(freq, start);
+          gain.gain.setValueAtTime(0.001, start);
+          gain.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.4);
+          osc.connect(gain);
+          gain.connect(this.ctx!.destination);
+          osc.start(start);
+          osc.stop(start + 0.4);
+        });
+      }
+    } catch {
+      // safe
+    }
+  }
+
+  playPerfectDeflect() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const freqs = [330.0, 659.25, 1318.5, 2637.0];
+      freqs.forEach((freq, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = idx === 0 ? "sawtooth" : "sine";
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.exponentialRampToValueAtTime(idx === 0 ? 0.3 : 0.15, now + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + (idx === 0 ? 0.6 : 0.9));
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(now);
+        osc.stop(now + 1.0);
+      });
+    } catch {
+      // safe
+    }
+  }
+
+  playShieldBreach() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(95, now);
+      osc.frequency.exponentialRampToValueAtTime(32, now + 0.28);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.28);
+    } catch {
+      // safe
+    }
+  }
 }
 
 const synth = new AudioSynth();
@@ -819,6 +922,12 @@ export default function AthleteMindPage() {
   const [clinicalBadges, setClinicalBadges] = useState<ClinicalBadge[]>(DEFAULT_CLINICAL_BADGES);
   const [adherence, setAdherence] = useState<AdherenceData>(DEFAULT_ADHERENCE);
 
+  // Phase 9: Lifecycle State Machine & Incoming Kinetic Deflection Engine
+  const [gameStage, setGameStage] = useState<GameStage>("IDLE");
+  const [calibrationCountdown, setCalibrationCountdown] = useState<number>(5);
+  const [deflectionsCompleted, setDeflectionsCompleted] = useState<number>(0);
+  const [deflectionsTarget, setDeflectionsTarget] = useState<number>(10);
+
   // DOM References
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -848,6 +957,18 @@ export default function AthleteMindPage() {
   const baselineSessionRef = useRef<RecoverySession>(DEFAULT_BASELINE_SESSION);
   const bioCreditsRef = useRef<number>(350);
   const isRestDayRef = useRef(false);
+
+  // Phase 9: Kinetic Deflection & State Machine Fast-Access Refs
+  const gameStageRef = useRef<GameStage>("IDLE");
+  const projectilesRef = useRef<KineticProjectile[]>([]);
+  const nextProjectileTimeRef = useRef<number>(0);
+  const hitStopUntilRef = useRef<number>(0);
+  const shieldBreachFlashRef = useRef<number>(0);
+  const lastCountdownSecRef = useRef<number>(-1);
+  const calibrationStartTimeRef = useRef<number>(0);
+  const pauseStartTimeRef = useRef<number>(0);
+  const totalPausedDurationRef = useRef<number>(0);
+  const deflectionsCompletedRef = useRef<number>(0);
 
   // Fast access mirrors
   const primaryAngleRef = useRef(180);
@@ -888,6 +1009,14 @@ export default function AthleteMindPage() {
   useEffect(() => {
     recoveryHistoryRef.current = recoveryHistory;
   }, [recoveryHistory]);
+
+  useEffect(() => {
+    gameStageRef.current = gameStage;
+  }, [gameStage]);
+
+  useEffect(() => {
+    deflectionsCompletedRef.current = deflectionsCompleted;
+  }, [deflectionsCompleted]);
 
   // Load vault, callsign, and clinical history on mount
   useEffect(() => {
@@ -1460,9 +1589,134 @@ export default function AthleteMindPage() {
     speakCoachCue("Clinical telemetry CSV generated");
   };
 
+  // ---------------------------------------------------------------------------
+  // Lifecycle Finite State Machine & Session Controls
+  // ---------------------------------------------------------------------------
+
+  const handleStartSession = useCallback(() => {
+    setGameStage("CALIBRATING");
+    gameStageRef.current = "CALIBRATING";
+    setCalibrationCountdown(5);
+    calibrationStartTimeRef.current = performance.now();
+    lastCountdownSecRef.current = -1;
+    projectilesRef.current = [];
+    nextProjectileTimeRef.current = 0;
+    totalPausedDurationRef.current = 0;
+    setDeflectionsCompleted(0);
+    deflectionsCompletedRef.current = 0;
+    synth.playCalibrationBeep(false);
+    speakCoachCue("Calibration countdown initiated. Step into frame.");
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "CALIBRATING" }));
+    }
+  }, [speakCoachCue]);
+
+  const handleTogglePause = useCallback(() => {
+    if (gameStageRef.current === "ACTIVE") {
+      setGameStage("PAUSED");
+      gameStageRef.current = "PAUSED";
+      pauseStartTimeRef.current = performance.now();
+      synth.playCalibrationBeep(false);
+      speakCoachCue("Session paused. Take a breather.");
+
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "PAUSED" }));
+      }
+    } else if (gameStageRef.current === "PAUSED") {
+      if (pauseStartTimeRef.current > 0) {
+        const pausedDelta = performance.now() - pauseStartTimeRef.current;
+        totalPausedDurationRef.current += pausedDelta;
+        projectilesRef.current.forEach((p) => {
+          p.spawnTime += pausedDelta;
+        });
+        if (nextProjectileTimeRef.current > 0) {
+          nextProjectileTimeRef.current += pausedDelta;
+        }
+        pauseStartTimeRef.current = 0;
+      }
+      setGameStage("ACTIVE");
+      gameStageRef.current = "ACTIVE";
+      synth.playCalibrationBeep(true);
+      speakCoachCue("Resuming protocol.");
+
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "ACTIVE" }));
+      }
+    }
+  }, [speakCoachCue]);
+
+  const handleAbortSession = useCallback(() => {
+    setGameStage("COMPLETED");
+    gameStageRef.current = "COMPLETED";
+    recordSessionAndEvaluateBadges();
+    setShowProgressModal(true);
+    speakCoachCue("Session completed. Viewing recovery telemetry.");
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "COMPLETED" }));
+    }
+  }, [recordSessionAndEvaluateBadges, speakCoachCue]);
+
+  const handleRestartSession = useCallback(() => {
+    handleResetCombat();
+    handleStartSession();
+  }, [handleResetCombat, handleStartSession]);
+
+  // Adjustment Countdown Timer (5s) before battle begins
+  useEffect(() => {
+    if (gameStage !== "CALIBRATING") return;
+
+    const interval = setInterval(() => {
+      const elapsed = (performance.now() - calibrationStartTimeRef.current) / 1000;
+      const remaining = Math.max(0, Math.ceil(5.0 - elapsed));
+
+      if (remaining !== lastCountdownSecRef.current) {
+        lastCountdownSecRef.current = remaining;
+        setCalibrationCountdown(remaining);
+
+        if (remaining > 0) {
+          synth.playCalibrationBeep(false);
+        } else {
+          // 0 -> ENGAGE!
+          synth.playCalibrationBeep(true);
+          speakCoachCue("Engage! Kinetic deflection defense active.");
+          setGameStage("ACTIVE");
+          gameStageRef.current = "ACTIVE";
+          nextProjectileTimeRef.current = performance.now() + 2500; // First kinetic projectile after 2.5s
+
+          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "ACTIVE" }));
+          }
+        }
+      }
+    }, 80);
+
+    return () => clearInterval(interval);
+  }, [gameStage, speakCoachCue]);
+
+  // Global Keyboard Listener for Spacebar and Escape (Pause / Resume / Start)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" || e.key === " " || e.key === "Escape") {
+        if ((e.target as HTMLElement)?.tagName === "INPUT") return;
+        if (e.code === "Space" || e.key === " ") {
+          e.preventDefault();
+        }
+        if (gameStageRef.current === "ACTIVE" || gameStageRef.current === "PAUSED") {
+          handleTogglePause();
+        } else if (gameStageRef.current === "IDLE") {
+          handleStartSession();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleTogglePause, handleStartSession]);
+
   // Boss Attack & Overheat Timer
   useEffect(() => {
-    if (matchStatus !== "ACTIVE") return;
+    if (matchStatus !== "ACTIVE" || gameStage !== "ACTIVE") return;
 
     const interval = setInterval(() => {
       setStunTimer((prevStun) => {
@@ -1558,6 +1812,20 @@ export default function AthleteMindPage() {
       recordSessionAndEvaluateBadges();
     }
   }, [bossHp, playerHp, matchStatus, formPurity, speakCoachCue, updateVault, fetchLeaderboard, recordSessionAndEvaluateBadges]);
+
+  // Phase 9: Kinetic Deflection Drill Completion Detection
+  useEffect(() => {
+    if (deflectionsCompleted >= deflectionsTarget && gameStage === "ACTIVE") {
+      setGameStage("COMPLETED");
+      gameStageRef.current = "COMPLETED";
+      synth.playVictory();
+      speakCoachCue("Deflection protocol completed! Outstanding biomechanical stability!");
+      recordSessionAndEvaluateBadges();
+      setTimeout(() => {
+        setShowProgressModal(true);
+      }, 1000);
+    }
+  }, [deflectionsCompleted, deflectionsTarget, gameStage, speakCoachCue, recordSessionAndEvaluateBadges]);
 
   // ---------------------------------------------------------------------------
   // Canvas Render Loop with Dynamic Color-Coded Kinematic Skeleton
@@ -1913,6 +2181,190 @@ export default function AthleteMindPage() {
           return updated;
         });
       }
+
+      // Calculate Patient Center of Mass & Deflection Perimeter
+      let pComX = width / 2;
+      let pComY = height * 0.55;
+      if (lHip && rHip) {
+        pComX = (lHip.x + rHip.x) / 2;
+        pComY = (lHip.y + rHip.y) / 2;
+      } else if (lSh && rSh) {
+        pComX = (lSh.x + rSh.x) / 2;
+        pComY = (lSh.y + rSh.y) / 2 + 60;
+      }
+
+      // 1. Pulsing Circular Deflection Perimeter
+      const pPerimeterRadius = 80 + 4 * Math.sin(performance.now() * 0.005);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(pComX, pComY, pPerimeterRadius, 0, Math.PI * 2);
+      ctx.setLineDash([8, 6]);
+      ctx.strokeStyle = "rgba(0, 240, 255, 0.45)";
+      ctx.lineWidth = 2.0;
+      ctx.shadowColor = "#00f0ff";
+      ctx.shadowBlur = 10;
+      ctx.stroke();
+      ctx.restore();
+
+      // 2. Hexagonal Kinetic Shield Manifestation
+      if (isDescentControlledRef.current || holdProgressRef.current > 0) {
+        const hexRadius = pPerimeterRadius + 14;
+        ctx.save();
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 6;
+          const hx = pComX + hexRadius * Math.cos(angle);
+          const hy = pComY + hexRadius * Math.sin(angle);
+          if (i === 0) ctx.moveTo(hx, hy);
+          else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = holdProgressRef.current >= 1.0 ? "#ffd700" : "#00f0ff";
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = holdProgressRef.current >= 1.0 ? "#ffd700" : "#10b981";
+        ctx.shadowBlur = 18;
+        ctx.stroke();
+
+        ctx.fillStyle = holdProgressRef.current >= 1.0 ? "rgba(255, 215, 0, 0.12)" : "rgba(0, 240, 255, 0.08)";
+        ctx.fill();
+
+        ctx.fillStyle = holdProgressRef.current >= 1.0 ? "#ffd700" : "#00f0ff";
+        ctx.font = "bold 11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("⬡ KINETIC SHIELD ENGAGED", pComX, pComY - hexRadius - 10);
+        ctx.restore();
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Incoming Kinetic Deflection Engine (4s Trajectory, 6-8s Spacing)
+    // -------------------------------------------------------------------------
+    const nowMs = performance.now();
+    const isHitStopActive = hitStopUntilRef.current > nowMs;
+    const comX = width / 2;
+    const comY = height * 0.55;
+    const perimeterRadius = 80;
+
+    if (gameStageRef.current === "ACTIVE") {
+      if (nextProjectileTimeRef.current === 0) {
+        nextProjectileTimeRef.current = nowMs + 2000;
+      } else if (nowMs >= nextProjectileTimeRef.current && !isHitStopActive) {
+        projectilesRef.current.push({
+          id: `proj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          startX: width / 2 + (Math.random() - 0.5) * 80,
+          startY: 20,
+          targetX: comX,
+          targetY: comY,
+          progress: 0.0,
+          duration: 4000,
+          spawnTime: nowMs,
+          radius: 16,
+          color: "#00f0ff",
+          status: "FLYING",
+        });
+        nextProjectileTimeRef.current = nowMs + 6500 + Math.random() * 1500;
+      }
+    }
+
+    const projectiles = projectilesRef.current;
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      if (p.status === "FLYING") {
+        if (gameStageRef.current === "ACTIVE" && !isHitStopActive) {
+          p.progress = Math.min(1.0, (nowMs - p.spawnTime) / p.duration);
+        }
+        const curX = p.startX + (p.targetX - p.startX) * p.progress;
+        const curY = p.startY + (p.targetY - p.startY) * p.progress;
+        const dist = Math.hypot(curX - comX, curY - comY);
+
+        if (dist <= perimeterRadius || p.progress >= 0.90) {
+          const pAng = primaryAngleRef.current;
+          const isAtDepth = pAng <= 100 || holdProgressRef.current >= 0.8;
+          const noValgus = !faultJointIndicesRef.current.includes(25) && !faultJointIndicesRef.current.includes(26);
+
+          if (isAtDepth && noValgus) {
+            p.status = "DEFLECTED";
+            hitStopUntilRef.current = nowMs + 80;
+            screenShakeRef.current = 24;
+            synth.playPerfectDeflect();
+            spawnParticles(curX, curY, 45, "#00f0ff");
+            spawnParticles(curX, curY, 25, "#ffd700");
+            spawnFloatingText("+1 PERFECT DEFLECT!", curX, curY - 24, "#00f0ff", 36);
+
+            deflectionsCompletedRef.current += 1;
+            setDeflectionsCompleted((c) => c + 1);
+            setBioCredits((prev) => {
+              const updated = prev + 25;
+              try {
+                localStorage.setItem("athletemind_bio_credits", updated.toString());
+              } catch {}
+              return updated;
+            });
+
+            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({ action: "report_deflect", success: true }));
+            }
+          } else {
+            p.status = "BREACHED";
+            synth.playShieldBreach();
+            shieldBreachFlashRef.current = nowMs + 400;
+            screenShakeRef.current = 16;
+            spawnParticles(curX, curY, 30, "#f59e0b");
+            spawnFloatingText("SHIELD BREACHED — STABILIZE DEPTH", curX, curY, "#f59e0b", 30);
+
+            if (isRestDayRef.current) {
+              spawnFloatingText("🌿 RESTORATIVE SHIELD (0 DMG)", curX, curY + 32, "#10b981", 28);
+            } else {
+              setPlayerHp((hp) => Math.max(0, hp - 10));
+            }
+
+            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({ action: "report_deflect", success: false }));
+            }
+          }
+        }
+
+        if (p.status === "FLYING") {
+          ctx.save();
+          for (let step = 1; step <= 3; step++) {
+            const tailProgress = Math.max(0, p.progress - step * 0.03);
+            const tx = p.startX + (p.targetX - p.startX) * tailProgress;
+            const ty = p.startY + (p.targetY - p.startY) * tailProgress;
+            ctx.beginPath();
+            ctx.arc(tx, ty, p.radius * (1 - step * 0.22), 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(0, 240, 255, ${0.45 - step * 0.12})`;
+            ctx.fill();
+          }
+
+          const orbGrad = ctx.createRadialGradient(curX, curY, 2, curX, curY, p.radius);
+          orbGrad.addColorStop(0, "#ffffff");
+          orbGrad.addColorStop(0.4, "#00f0ff");
+          orbGrad.addColorStop(1, "rgba(0, 240, 255, 0)");
+          ctx.beginPath();
+          ctx.arc(curX, curY, p.radius, 0, Math.PI * 2);
+          ctx.fillStyle = orbGrad;
+          ctx.shadowColor = "#00f0ff";
+          ctx.shadowBlur = 18;
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(curX, curY, p.radius + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.restore();
+        }
+      } else {
+        projectiles.splice(i, 1);
+      }
+    }
+
+    if (shieldBreachFlashRef.current > nowMs) {
+      const flashAlpha = Math.max(0, (shieldBreachFlashRef.current - nowMs) / 400);
+      ctx.save();
+      ctx.fillStyle = `rgba(245, 158, 11, ${flashAlpha * 0.28})`;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
     }
 
     // 4. Update & Render Particles
@@ -2578,6 +3030,25 @@ export default function AthleteMindPage() {
                 </div>
               </div>
 
+              {/* Kinetic Deflection Metric Chip */}
+              <div
+                className={`text-center px-3 py-1 rounded-xl bg-black/60 border transition-all duration-300 ${
+                  gameStage === "ACTIVE"
+                    ? "border-cyan-400 shadow-[0_0_12px_rgba(0,240,255,0.4)]"
+                    : gameStage === "PAUSED"
+                    ? "border-amber-400"
+                    : "border-slate-700/60"
+                }`}
+              >
+                <div className="text-[9px] text-cyan-400 font-semibold tracking-widest uppercase flex items-center justify-center gap-1">
+                  <span>DEFLECTED</span>
+                </div>
+                <div className="text-sm font-black font-mono tracking-tight text-white flex items-center justify-center gap-1">
+                  <span className="text-cyan-400">🛡️</span>
+                  <span>{deflectionsCompleted} / {deflectionsTarget}</span>
+                </div>
+              </div>
+
               <div
                 className={`text-center px-3 py-1 rounded-xl bg-black/60 border ${
                   incomingAttack
@@ -2606,6 +3077,38 @@ export default function AthleteMindPage() {
 
             {/* Right: Boss HP & Navigation Badges */}
             <div className="flex items-center gap-2.5 justify-end">
+              {/* Primary Session State Control Button */}
+              <button
+                onClick={() => {
+                  if (gameStage === "ACTIVE" || gameStage === "PAUSED") {
+                    handleTogglePause();
+                  } else if (gameStage === "IDLE") {
+                    handleStartSession();
+                  } else if (gameStage === "COMPLETED") {
+                    handleRestartSession();
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-lg ${
+                  gameStage === "ACTIVE"
+                    ? "bg-amber-950/80 hover:bg-amber-900 border-amber-500/60 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.3)]"
+                    : gameStage === "PAUSED"
+                    ? "bg-cyan-500 hover:bg-cyan-400 border-cyan-400 text-black font-black animate-pulse shadow-[0_0_15px_rgba(0,240,255,0.6)]"
+                    : gameStage === "CALIBRATING"
+                    ? "bg-slate-900 border-cyan-400 text-cyan-300 cursor-wait"
+                    : "bg-emerald-500 hover:bg-emerald-400 border-emerald-400 text-black font-black shadow-[0_0_15px_rgba(16,185,129,0.5)]"
+                }`}
+                title="Session State Machine Control (Spacebar / Escape)"
+              >
+                <span>
+                  {gameStage === "ACTIVE"
+                    ? "⏸️ PAUSE"
+                    : gameStage === "PAUSED"
+                    ? "▶️ RESUME"
+                    : gameStage === "CALIBRATING"
+                    ? "⏳ 5S..."
+                    : "▶️ START"}
+                </span>
+              </button>
               <div className="w-48 text-right hidden lg:block">
                 <div className="flex justify-between text-[11px] font-bold tracking-wider mb-1">
                   <span className={isEnraged ? "text-rose-500 animate-pulse font-black flex items-center justify-end gap-1" : "text-violet-400"}>
@@ -2939,6 +3442,117 @@ export default function AthleteMindPage() {
                 <div className="text-xs font-mono font-black text-rose-300">
                   PARRY WINDOW: <span className="text-white text-sm">{parryWindowSec.toFixed(1)}s</span>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* --------------------------------------------------------------- */}
+          {/* LIFECYCLE STATE MACHINE OVERLAYS (ZERO CAMERA DESYNC)           */}
+          {/* --------------------------------------------------------------- */}
+
+          {/* 1. IDLE State Overlay: Protocol Initiation */}
+          {gameStage === "IDLE" && (
+            <div className="absolute inset-0 z-40 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
+              <div className="w-16 h-16 rounded-3xl bg-cyan-950/80 border-2 border-cyan-400 flex items-center justify-center text-3xl mb-4 shadow-[0_0_30px_rgba(0,240,255,0.4)] animate-pulse">
+                🛡️
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black text-cyan-300 uppercase tracking-widest mb-2 font-mono drop-shadow-[0_0_15px_rgba(0,240,255,0.4)]">
+                KINETIC DEFLECTION PROTOCOL
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-300 max-w-md mb-6 leading-relaxed">
+                Incoming kinetic orbs target your center of mass. Lower your hips into a controlled squat (depth ≤ 100°) to project the hexagonal kinetic shield and deflect incoming projectiles.
+              </p>
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <button
+                  onClick={handleStartSession}
+                  className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-black font-black text-xs sm:text-sm uppercase tracking-widest cursor-pointer shadow-[0_0_25px_rgba(0,240,255,0.6)] transition-all flex items-center gap-2 transform hover:scale-105"
+                >
+                  <span>▶</span>
+                  <span>COMMENCE PROTOCOL (5S ADJUSTMENT)</span>
+                </button>
+              </div>
+              <div className="mt-4 text-[11px] text-slate-400 font-mono">
+                Press <kbd className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-cyan-300">SPACEBAR</kbd> to initiate
+              </div>
+            </div>
+          )}
+
+          {/* 2. CALIBRATING State Overlay: 5s Adjustment Countdown */}
+          {gameStage === "CALIBRATING" && (
+            <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-none">
+              <div className="flex flex-col items-center">
+                <div className="text-xs sm:text-sm font-black text-cyan-400 uppercase tracking-[0.3em] mb-3 font-mono animate-pulse">
+                  CALIBRATING PATIENT KINEMATICS
+                </div>
+                <div className="text-8xl sm:text-9xl font-black font-mono tracking-tight text-white drop-shadow-[0_0_40px_rgba(0,240,255,0.9)] animate-ping">
+                  {calibrationCountdown > 0 ? calibrationCountdown : "ENGAGE!"}
+                </div>
+                <div className="text-xs text-slate-300 font-mono mt-6 px-5 py-2 rounded-full bg-black/80 border border-cyan-500/50 shadow-[0_0_15px_rgba(0,240,255,0.3)]">
+                  STEP INTO FRAME • ESTABLISH STABLE BASE
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. PAUSED State Overlay: Zero Camera Desync Breather */}
+          {gameStage === "PAUSED" && (
+            <div className="absolute inset-0 z-40 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+              <div className="w-16 h-16 rounded-3xl bg-amber-950/80 border-2 border-amber-400 flex items-center justify-center text-3xl mb-3 shadow-[0_0_30px_rgba(245,158,11,0.4)] animate-pulse">
+                ⏸️
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black text-amber-300 uppercase tracking-widest mb-1 font-mono drop-shadow-[0_0_15px_rgba(245,158,11,0.4)]">
+                SESSION PAUSED — TAKE A BREATHER
+              </h2>
+              <p className="text-xs text-emerald-400 font-mono uppercase tracking-wider mb-6 flex items-center justify-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                CAMERA SENSORS LIVE IN BACKGROUND • ZERO DESYNC
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-4">
+                <button
+                  onClick={handleTogglePause}
+                  className="px-7 py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-black font-black text-xs uppercase tracking-widest cursor-pointer shadow-[0_0_20px_rgba(0,240,255,0.5)] transition-all flex items-center gap-2 transform hover:scale-105"
+                >
+                  <span>▶</span>
+                  <span>RESUME PROTOCOL [SPACE]</span>
+                </button>
+                <button
+                  onClick={handleAbortSession}
+                  className="px-6 py-3 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-rose-500/50 hover:border-rose-500 text-rose-300 font-bold text-xs uppercase tracking-widest cursor-pointer transition-all flex items-center gap-2"
+                >
+                  <span>⏹</span>
+                  <span>ABORT & VIEW RECOVERY</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 4. COMPLETED State Overlay: Drill Accomplished */}
+          {gameStage === "COMPLETED" && (
+            <div className="absolute inset-0 z-40 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+              <div className="w-16 h-16 rounded-3xl bg-teal-950/80 border-2 border-teal-400 flex items-center justify-center text-3xl mb-3 shadow-[0_0_30px_rgba(20,184,166,0.5)] animate-bounce">
+                🏆
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black text-teal-300 uppercase tracking-widest mb-2 font-mono drop-shadow-[0_0_15px_rgba(20,184,166,0.4)]">
+                DEFLECTION DRILL COMPLETED
+              </h2>
+              <p className="text-xs text-slate-300 mb-6 font-mono max-w-md leading-relaxed">
+                {deflectionsCompleted} / {deflectionsTarget} incoming kinetic orbs successfully deflected with eccentric depth and stability.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-4">
+                <button
+                  onClick={() => setShowProgressModal(true)}
+                  className="px-7 py-3 rounded-2xl bg-teal-500 hover:bg-teal-400 text-black font-black text-xs uppercase tracking-widest cursor-pointer shadow-[0_0_20px_rgba(20,184,166,0.5)] transition-all flex items-center gap-2 transform hover:scale-105"
+                >
+                  <span>📈</span>
+                  <span>VIEW RECOVERY TRAJECTORY</span>
+                </button>
+                <button
+                  onClick={handleRestartSession}
+                  className="px-6 py-3 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/50 hover:border-cyan-400 text-cyan-300 font-bold text-xs uppercase tracking-widest cursor-pointer transition-all flex items-center gap-2"
+                >
+                  <span>🔄</span>
+                  <span>RESTART PROTOCOL</span>
+                </button>
               </div>
             </div>
           )}

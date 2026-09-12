@@ -500,8 +500,37 @@ def test_dual_profile_adaptive_kinematics():
     print("\n[OK] ALL DUAL PROFILE ADAPTIVE KINEMATICS TESTS PASSED!")
 
 
+def test_phase9_kinetic_deflection_and_stage_fsm():
+    print("\n--- 12. Testing Phase 9 Kinetic Deflection & Stage State Machine ---")
+    combat = BossCombatEngine()
+    assert combat.game_stage == "ACTIVE"
+
+    # In ACTIVE, attack timer ticks down
+    res1 = combat.update(now=10.0, is_holding=False, rep_count=0, had_fault=False, is_critical=False)
+    assert res1["boss_attack_timer"] <= 10.0
+    res2 = combat.update(now=11.0, is_holding=False, rep_count=0, had_fault=False, is_critical=False)
+    assert res2["boss_attack_timer"] < res1["boss_attack_timer"]
+
+    # Pause the game stage
+    combat.game_stage = "PAUSED"
+    paused_timer = res2["boss_attack_timer"]
+    res_paused = combat.update(now=20.0, is_holding=False, rep_count=0, had_fault=False, is_critical=False)
+    assert res_paused["boss_attack_timer"] == paused_timer
+    assert not res_paused["incoming_attack"]
+    print("Pause & Calibration Timer Freeze Verified!")
+
+    # Resume to ACTIVE
+    combat.game_stage = "ACTIVE"
+    res_resumed = combat.update(now=20.1, is_holding=False, rep_count=0, had_fault=False, is_critical=False)
+    assert res_resumed["boss_attack_timer"] <= paused_timer
+    print("Resume Protocol Functionality Verified!")
+
+    print("\n[OK] ALL PHASE 9 KINETIC DEFLECTION & STAGE TESTS PASSED!")
+
+
 if __name__ == "__main__":
     test_phase5_multi_exercise_3d_engine()
     test_phase6_boss_combat_and_parrying()
     test_phase7_mutators_and_leaderboard()
     test_dual_profile_adaptive_kinematics()
+    test_phase9_kinetic_deflection_and_stage_fsm()

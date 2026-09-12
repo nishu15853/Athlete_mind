@@ -1410,6 +1410,7 @@ class BossCombatEngine:
     """
     def __init__(self, modifiers: Optional[List[str]] = None):
         self.modifiers: List[str] = [m.upper() for m in (modifiers or [])]
+        self.game_stage: str = "ACTIVE"
         self.reset()
 
     def set_modifiers(self, modifiers: List[str]):
@@ -1438,6 +1439,26 @@ class BossCombatEngine:
         self.telegraph_announced = False
 
     def update(self, now: float, is_holding: bool, rep_count: int, had_fault: bool, is_critical: bool) -> Dict[str, Any]:
+        if self.game_stage != "ACTIVE":
+            self.last_update_time = None
+            return {
+                "boss_hp": self.boss_hp,
+                "boss_max_hp": self.boss_max_hp,
+                "player_hp": self.player_hp,
+                "player_max_hp": self.player_max_hp,
+                "boss_state": self.boss_state,
+                "boss_attack_timer": round(self.attack_timer, 1),
+                "incoming_attack": False,
+                "parry_window_sec": 0.0,
+                "parry_success": False,
+                "parry_failed": False,
+                "combo_streak": self.combo_streak,
+                "combo_multiplier": self.damage_multiplier,
+                "streak_collapsed": False,
+                "combat_damage_dealt": 0,
+                "combat_damage_taken": 0,
+            }
+
         dt = 0.1
         if self.last_update_time is not None:
             dt = max(0.01, min(0.5, now - self.last_update_time))
@@ -1815,6 +1836,45 @@ async def websocket_endpoint(websocket: WebSocket):
                     "boss_max_hp": combat_engine.boss_max_hp,
                     "player_hp": combat_engine.player_hp,
                     "boss_state": combat_engine.boss_state,
+                    "combo_streak": combat_engine.combo_streak,
+                    "combo_multiplier": combat_engine.damage_multiplier,
+                })
+            # Handle session stage transitions (CALIBRATING, ACTIVE, PAUSED, COMPLETED, IDLE)
+            if data.get("action") == "set_stage":
+                new_stage = str(data.get("stage", "ACTIVE")).upper()
+                combat_engine.game_stage = new_stage
+                combat_engine.last_update_time = None
+                await websocket.send_json({
+                    "event": "STAGE_CHANGED",
+                    "stage": new_stage,
+                    "status": "STAGE_SYNCED",
+                    "boss_hp": combat_engine.boss_hp,
+                    "player_hp": combat_engine.player_hp,
+                })
+                continue
+
+            # Handle kinetic deflection reports
+            if data.get("action") == "report_deflect":
+                success = bool(data.get("success", False))
+                if success:
+                    combat_engine.combo_streak += 1
+                    if combat_engine.combo_streak >= 4:
+                        combat_engine.damage_multiplier = 3.0
+                    elif combat_engine.combo_streak == 3:
+                        combat_engine.damage_multiplier = 2.0
+                    elif combat_engine.combo_streak == 2:
+                        combat_engine.damage_multiplier = 1.5
+                    else:
+                        combat_engine.damage_multiplier = 1.0
+                    combat_engine.boss_hp = max(0, combat_engine.boss_hp - 50)
+                else:
+                    if "REST_DAY" not in current_modifiers:
+                        combat_engine.combo_streak = 0
+                        combat_engine.damage_multiplier = 1.0
+                await websocket.send_json({
+                    "event": "DEFLECTION_PROCESSED",
+                    "success": success,
+                    "boss_hp": combat_engine.boss_hp,
                     "combo_streak": combat_engine.combo_streak,
                     "combo_multiplier": combat_engine.damage_multiplier,
                 })
