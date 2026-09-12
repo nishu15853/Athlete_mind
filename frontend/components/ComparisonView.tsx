@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { ClinicalSoapCard } from "./ClinicalSoapCard";
+import { EXERCISE_LIST, getExerciseConfig } from "@/lib/exercises";
 
 export interface RecoverySession {
   id: string;
@@ -11,6 +12,7 @@ export interface RecoverySession {
   valgusEvents: number;
   stabilityScore: number;
   repsCompleted: number;
+  exerciseId?: string;
 }
 
 interface ComparisonViewProps {
@@ -22,6 +24,7 @@ interface ComparisonViewProps {
     valgusCount: number;
     descentTime: number;
   };
+  activeExercise?: string;
   onBack: () => void;
 }
 
@@ -33,15 +36,16 @@ const DEFAULT_BASELINE: RecoverySession = {
   valgusEvents: 6,
   stabilityScore: 62.0,
   repsCompleted: 6,
+  exerciseId: "squats",
 };
 
 const DEFAULT_HISTORY: RecoverySession[] = [
-  { id: "rec_1", date: "Aug 29 (Day 1)", avgDepthAngle: 108.0, maxHoldDuration: 0.5, valgusEvents: 6, stabilityScore: 62.0, repsCompleted: 6 },
-  { id: "rec_2", date: "Sep 01 (Day 4)", avgDepthAngle: 104.5, maxHoldDuration: 0.9, valgusEvents: 4, stabilityScore: 71.0, repsCompleted: 8 },
-  { id: "rec_3", date: "Sep 04 (Day 7)", avgDepthAngle: 99.0, maxHoldDuration: 1.2, valgusEvents: 3, stabilityScore: 78.0, repsCompleted: 10 },
-  { id: "rec_4", date: "Sep 07 (Day 10)", avgDepthAngle: 94.5, maxHoldDuration: 1.6, valgusEvents: 2, stabilityScore: 85.0, repsCompleted: 12 },
-  { id: "rec_5", date: "Sep 09 (Day 12)", avgDepthAngle: 91.0, maxHoldDuration: 1.9, valgusEvents: 1, stabilityScore: 92.0, repsCompleted: 14 },
-  { id: "rec_6", date: "Sep 11 (Day 14)", avgDepthAngle: 88.0, maxHoldDuration: 2.1, valgusEvents: 0, stabilityScore: 97.0, repsCompleted: 15 },
+  { id: "rec_1", date: "Aug 29 (Day 1)", avgDepthAngle: 108.0, maxHoldDuration: 0.5, valgusEvents: 6, stabilityScore: 62.0, repsCompleted: 6, exerciseId: "squats" },
+  { id: "rec_2", date: "Sep 01 (Day 4)", avgDepthAngle: 104.5, maxHoldDuration: 0.9, valgusEvents: 4, stabilityScore: 71.0, repsCompleted: 8, exerciseId: "squats" },
+  { id: "rec_3", date: "Sep 04 (Day 7)", avgDepthAngle: 99.0, maxHoldDuration: 1.2, valgusEvents: 3, stabilityScore: 78.0, repsCompleted: 10, exerciseId: "squats" },
+  { id: "rec_4", date: "Sep 07 (Day 10)", avgDepthAngle: 94.5, maxHoldDuration: 1.6, valgusEvents: 2, stabilityScore: 85.0, repsCompleted: 12, exerciseId: "squats" },
+  { id: "rec_5", date: "Sep 09 (Day 12)", avgDepthAngle: 91.0, maxHoldDuration: 1.9, valgusEvents: 1, stabilityScore: 92.0, repsCompleted: 14, exerciseId: "squats" },
+  { id: "rec_6", date: "Sep 11 (Day 14)", avgDepthAngle: 88.0, maxHoldDuration: 2.1, valgusEvents: 0, stabilityScore: 97.0, repsCompleted: 15, exerciseId: "squats" },
 ];
 
 export const ComparisonView: React.FC<ComparisonViewProps> = ({
@@ -53,9 +57,18 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
     valgusCount: 0,
     descentTime: 2.4,
   },
+  activeExercise = "squats",
   onBack,
 }) => {
-  const history = recoveryHistory.length >= 2 ? recoveryHistory : DEFAULT_HISTORY;
+  const [selectedFilter, setSelectedFilter] = useState<string>(activeExercise);
+
+  // Filter history by exerciseId
+  const rawHistory = recoveryHistory.length >= 2 ? recoveryHistory : DEFAULT_HISTORY;
+  const filtered = rawHistory.filter(
+    (s) => !s.exerciseId || s.exerciseId === selectedFilter
+  );
+  const history = filtered.length >= 1 ? filtered : rawHistory;
+  const activeExConfig = getExerciseConfig(selectedFilter);
 
   // Compute key delta statistics
   const day1Depth = baselineSession.avgDepthAngle || 108.0;
@@ -101,13 +114,37 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
 
       {/* Main Container */}
       <main className="relative z-10 w-full max-w-6xl mx-auto flex flex-col gap-6 mt-6">
+        {/* Exercise Filter Selector */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider whitespace-nowrap mr-2">
+            EXERCISE PROTOCOL:
+          </span>
+          {EXERCISE_LIST.map((ex) => {
+            const isSelected = ex.id === selectedFilter;
+            return (
+              <button
+                key={ex.id}
+                onClick={() => setSelectedFilter(ex.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                  isSelected
+                    ? "bg-teal-500 text-black shadow-[0_0_15px_rgba(20,184,166,0.6)]"
+                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800"
+                }`}
+              >
+                <span>{ex.icon}</span>
+                <span>{ex.name}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* "Day 1 Baseline vs. Best vs. Today" 4-Card Analytics Matrix */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: Maximum Depth ROM Gain */}
+          {/* Card 1: Maximum ROM Gain */}
           <div className="p-5 rounded-3xl bg-slate-950/80 border border-teal-500/40 backdrop-blur-md shadow-xl flex flex-col justify-between">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                MAXIMUM SQUAT DEPTH
+                MAXIMUM {activeExConfig.primaryAngleName.toUpperCase()}
               </span>
               <span className="px-2 py-0.5 rounded-lg bg-teal-500/20 text-teal-300 text-[10px] font-black">
                 +{depthGain}° GAIN
@@ -341,7 +378,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
         {/* AI Clinical Synthesis (SOAP Note) */}
         <ClinicalSoapCard
           callsign="OPERATIVE_01"
-          exercise="squats"
+          exercise={activeExConfig.name}
           repsCompleted={history[history.length - 1]?.repsCompleted || 15}
           avgDepthAngle={todayDepth}
           maxHoldDuration={todayHold}

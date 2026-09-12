@@ -11,6 +11,13 @@ import { AchievementsView, AchievementItem } from "@/components/AchievementsView
 import { CircuitSelectView, CircuitMode } from "@/components/CircuitSelectView";
 import { SettingsView } from "@/components/SettingsView";
 import { ClinicalSoapCard } from "@/components/ClinicalSoapCard";
+import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
+import {
+  EXERCISE_CONFIGS,
+  EXERCISE_LIST,
+  getExerciseConfig,
+  ExerciseConfig,
+} from "@/lib/exercises";
 
 // ---------------------------------------------------------------------------
 // Types & Declarations
@@ -22,7 +29,18 @@ declare global {
   }
 }
 
-type ExerciseType = "squats" | "pushups" | "overhead_press" | "rdl";
+export type ExerciseType =
+  | "squats"
+  | "pushups"
+  | "single_leg_balance"
+  | "overhead_press"
+  | "scaption"
+  | "rdl"
+  | "calf_raise"
+  | "high_knee_march"
+  | "torso_rotation"
+  | "lateral_lunge"
+  | "wall_pushup";
 type DifficultyType = "rehab" | "standard" | "athlete";
 type SkeletalShader = "cyberpunk" | "molten_core" | "void_phantom";
 type Soundpack = "arcade_synth" | "heavy_mecha";
@@ -257,6 +275,7 @@ export interface RecoverySession {
   valgusEvents: number;
   stabilityScore: number; // 0 - 100%
   repsCompleted: number;
+  exerciseId?: string;
 }
 
 export interface ClinicalBadge {
@@ -1543,6 +1562,7 @@ export default function AthleteMindPage() {
   const [orientationView, setOrientationView] = useState<string>("front");
   const [activeProfile, setActiveProfile] = useState<"SIDE" | "FRONT">("FRONT");
   const [profileMetricValue, setProfileMetricValue] = useState<number>(0);
+  const [showExerciseSelector, setShowExerciseSelector] = useState(false);
 
   // Dynamic Joint Angle Tracking
   const [primaryAngle, setPrimaryAngle] = useState(180);
@@ -2067,27 +2087,12 @@ export default function AthleteMindPage() {
   const handleSelectExercise = (newEx: ExerciseType) => {
     setExercise(newEx);
     exerciseRef.current = newEx;
-    if (newEx === "pushups") {
-      setPrimaryAngleName("Elbow");
-      setSecondaryAngleName("Plank");
-      setActiveJointIdx(13);
-      activeJointIdxRef.current = 13;
-    } else if (newEx === "overhead_press") {
-      setPrimaryAngleName("Shoulder");
-      setSecondaryAngleName("Spine");
-      setActiveJointIdx(11);
-      activeJointIdxRef.current = 11;
-    } else if (newEx === "rdl") {
-      setPrimaryAngleName("Hinge");
-      setSecondaryAngleName("Knee");
-      setActiveJointIdx(23);
-      activeJointIdxRef.current = 23;
-    } else {
-      setPrimaryAngleName("Knee");
-      setSecondaryAngleName("Hip");
-      setActiveJointIdx(25);
-      activeJointIdxRef.current = 25;
-    }
+    const config = getExerciseConfig(newEx);
+    setPrimaryAngleName(config.primaryAngleName);
+    setSecondaryAngleName(config.secondaryAngleName);
+    setActiveJointIdx(config.defaultActiveJointIndex);
+    activeJointIdxRef.current = config.defaultActiveJointIndex;
+    setTargetHoldDuration(config.deflectionHoldTime);
 
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(
@@ -2099,7 +2104,7 @@ export default function AthleteMindPage() {
         })
       );
     }
-    speakCoachCue(`Switched to ${newEx.replace("_", " ")}`);
+    speakCoachCue(`Switched protocol to ${config.name}`);
   };
 
   // Difficulty Change Handler
@@ -2241,6 +2246,7 @@ export default function AthleteMindPage() {
       valgusEvents: valgusCount,
       stabilityScore: formPurity,
       repsCompleted: repCount,
+      exerciseId: exerciseRef.current,
     };
 
     setRecoveryHistory((prev) => {
@@ -2318,7 +2324,7 @@ export default function AthleteMindPage() {
         } else if (ach.id === "bilateral_master" && formPurity >= 95 && repCount >= 5) {
           newProgress = 1.6;
           unlocked = true;
-        } else if (ach.id === "pushup_pioneer" && exercise === "pushups") {
+        } else if (ach.id === "pushup_pioneer" && (exercise === "pushups" || exercise === "wall_pushup")) {
           newProgress = Math.min(ach.maxProgress, Math.max(ach.currentProgress, repCount));
           if (newProgress >= 10) unlocked = true;
         } else if (ach.id === "relentless_adherence") {
@@ -3385,7 +3391,8 @@ export default function AthleteMindPage() {
             setGameStage("CALIBRATION_SHIELD");
             gameStageRef.current = "CALIBRATION_SHIELD";
             calibrationStanceFramesRef.current = 0;
-            speakCoachCue("Full body framed. Test squat shield: lower to 90 degrees and hold for 1.5 seconds.");
+            const activeCfg = getExerciseConfig(exerciseRef.current);
+            speakCoachCue(`Full body framed. Test ${activeCfg.name} shield: ${activeCfg.actionPrompt} and hold.`);
             if (socketRef.current?.readyState === WebSocket.OPEN) {
               socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "CALIBRATION_SHIELD" }));
             }
@@ -3394,9 +3401,12 @@ export default function AthleteMindPage() {
           calibrationStanceFramesRef.current = 0;
         }
       } else if (gameStageRef.current === "CALIBRATION_SHIELD") {
-        const pAng = primaryAngleRef.current;
-        const isSquatDepth = pAng <= 100 || profileMetricValue >= 28;
-        if (isSquatDepth) {
+        const activeCfg = getExerciseConfig(exerciseRef.current);
+        const metricRes = landmarks ? activeCfg.calculateMetrics(landmarks) : null;
+        const isPostureReady = metricRes
+          ? metricRes.isDepthReached || metricRes.isHolding
+          : primaryAngleRef.current <= (activeCfg.targetAngle ?? 100) + 10;
+        if (isPostureReady) {
           calibrationShieldHoldSecRef.current += 0.025;
           const progress = Math.min(1.0, calibrationShieldHoldSecRef.current / 1.5);
           setShieldTestHoldProgress(progress);
@@ -3492,11 +3502,16 @@ export default function AthleteMindPage() {
         const dist = Math.hypot(curX - comX, curY - comY);
 
         if (dist <= perimeterRadius || p.progress >= 0.90) {
-          const pAng = primaryAngleRef.current;
-          const isAtDepth = pAng <= 100 || holdProgressRef.current >= 0.8;
-          const noValgus = !faultJointIndicesRef.current.includes(25) && !faultJointIndicesRef.current.includes(26);
+          const activeCfg = getExerciseConfig(exerciseRef.current);
+          const metricRes = landmarks ? activeCfg.calculateMetrics(landmarks) : null;
+          const isAtDepth = metricRes
+            ? (metricRes.isDepthReached || metricRes.isHolding)
+            : (primaryAngleRef.current <= (activeCfg.targetAngle ?? 100) + 5 || holdProgressRef.current >= 0.8);
+          const noFault = metricRes
+            ? !metricRes.faultDetected
+            : faultJointIndicesRef.current.length === 0;
 
-          if (isAtDepth && noValgus) {
+          if (isAtDepth && noFault) {
             p.status = "DEFLECTED";
             hitStopUntilRef.current = nowMs + 80;
             screenShakeRef.current = 24;
@@ -3718,6 +3733,54 @@ export default function AthleteMindPage() {
       if (!isRunning) return;
       if (results.poseLandmarks) {
         landmarksRef.current = results.poseLandmarks;
+
+        // Dynamic 10-Exercise Clinical Evaluation
+        const activeCfg = getExerciseConfig(exerciseRef.current);
+        const metricRes = activeCfg.calculateMetrics(results.poseLandmarks);
+
+        if (metricRes.primaryAngle !== undefined) {
+          setPrimaryAngle(Math.round(metricRes.primaryAngle));
+          primaryAngleRef.current = metricRes.primaryAngle;
+        }
+        if (metricRes.secondaryAngle !== undefined) {
+          setSecondaryAngle(Math.round(metricRes.secondaryAngle));
+        }
+        if (metricRes.activeJointIndices?.[0] !== undefined) {
+          setActiveJointIdx(metricRes.activeJointIndices[0]);
+          activeJointIdxRef.current = metricRes.activeJointIndices[0];
+        }
+        if (metricRes.faultJointIndices) {
+          setFaultJointIndices(metricRes.faultJointIndices);
+          faultJointIndicesRef.current = metricRes.faultJointIndices;
+        }
+
+        // Real-time Standalone/Offline Hold Progress and Banner Update
+        const isSocketActive = socketRef.current && socketRef.current.readyState === WebSocket.OPEN;
+        if (!isSocketActive && gameStageRef.current === "ACTIVE_DEFLECTION") {
+          if (metricRes.isHolding) {
+            const holdTarget = activeCfg.deflectionHoldTime || 1.5;
+            setHoldProgress((prev) => {
+              const next = Math.min(1.0, prev + 0.033 / holdTarget);
+              holdProgressRef.current = next;
+              return next;
+            });
+            setCombatBanner(activeCfg.holdPrompt);
+            setCombatBannerType("HOLD");
+          } else if (metricRes.faultDetected) {
+            setCombatBanner(metricRes.faultMessage || activeCfg.faultPrompt);
+            setCombatBannerType("FAULT");
+            holdProgressRef.current = 0;
+            setHoldProgress(0);
+          } else if (metricRes.isDepthReached) {
+            setCombatBanner(activeCfg.completePrompt);
+            setCombatBannerType("CRIT");
+          } else {
+            setCombatBanner(activeCfg.actionPrompt);
+            setCombatBannerType("WAITING");
+            holdProgressRef.current = Math.max(0, holdProgressRef.current - 0.04);
+            setHoldProgress(holdProgressRef.current);
+          }
+        }
 
         const socket = socketRef.current;
         if (socket && socket.readyState === WebSocket.OPEN) {
@@ -4233,7 +4296,7 @@ export default function AthleteMindPage() {
         return "Limited squat depth: focus on ankle dorsiflexion and adductor mobility to achieve parallel depth.";
       }
       return "Symmetric lower extremity kinematics: bilateral joint flexion displays steady eccentric control.";
-    } else if (exercise === "pushups") {
+    } else if (exercise === "pushups" || exercise === "wall_pushup") {
       if (postureFaultsCount > 2) {
         return "Core/lumbar sagging detected during push-ups: strengthen anterior core via RKC planks and hollow body holds.";
       }
@@ -4243,11 +4306,17 @@ export default function AthleteMindPage() {
         return "Lumbar hyperextension compensation observed: engage rectus abdominis and improve thoracic extension.";
       }
       return "True vertical pressing plane: scapular upward rotation and spinal bracing meet athletic standards.";
-    } else {
+    } else if (exercise === "rdl") {
       if (postureFaultsCount > 2) {
         return "Squatting the hinge detected: maintain soft knee flexion while emphasizing posterior hip drive and hamstring recruitment.";
       }
       return "Pure hip hinge mechanics: posterior chain load transfer and spinal neutrality verified.";
+    } else {
+      const activeCfg = getExerciseConfig(exercise);
+      if (postureFaultsCount > 2) {
+        return `${activeCfg.faultPrompt}: ensure strict biomechanical alignment according to clinical guidelines.`;
+      }
+      return `Superb ${activeCfg.name} kinematic execution: target ROM and neuromuscular control verified.`;
     }
   };
 
@@ -4281,6 +4350,8 @@ export default function AthleteMindPage() {
           bioCredits={bioCredits}
           energyCores={vault.energyCores}
           callsign={callsign}
+          activeExerciseName={getExerciseConfig(exercise).name}
+          onOpenExerciseSelector={() => setShowExerciseSelector(true)}
           onNavigate={(view) => setActiveView(view)}
         />
       )}
@@ -4327,6 +4398,7 @@ export default function AthleteMindPage() {
         <ComparisonView
           baselineSession={baselineSession}
           recoveryHistory={recoveryHistory}
+          activeExercise={exercise}
           currentSession={{
             minAngle: minSessionAngle < 180 ? minSessionAngle : 90,
             holdDuration:
@@ -4394,6 +4466,15 @@ export default function AthleteMindPage() {
                   {activeCircuitMode === "FULL_BODY" && <span>• STAGE {circuitStep}/2</span>}
                 </div>
               )}
+              <button
+                onClick={() => setShowExerciseSelector(true)}
+                className="px-3 py-1.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 hover:border-cyan-400 text-xs font-mono font-bold text-cyan-300 transition-all cursor-pointer flex items-center gap-1.5 shadow-md group"
+                title="Change Clinical Exercise Protocol"
+              >
+                <span>{getExerciseConfig(exercise).icon}</span>
+                <span className="hidden md:inline uppercase">{getExerciseConfig(exercise).name}</span>
+                <span className="text-[10px] text-cyan-400/80 group-hover:text-white">▾</span>
+              </button>
             </div>
 
         {/* Center: Large High-Contrast Status Callout */}
@@ -5011,18 +5092,29 @@ export default function AthleteMindPage() {
           )}
 
           {/* Giant Dynamic Center Action Banner (Strict State-Gated: ACTIVE_DEFLECTION Only) */}
-          {gameStage === "ACTIVE_DEFLECTION" && (
-            <GiantActionBanner
-              state={getGiantBannerState()}
-              holdProgress={holdProgress}
-              targetHoldDuration={targetHoldDuration}
-              customMessage={
-                combatBannerType === "EGO_LIFT"
-                  ? "EGO LIFT / KNEE CAVE DETECTED"
-                  : undefined
-              }
-            />
-          )}
+          {gameStage === "ACTIVE_DEFLECTION" && (() => {
+            const activeCfg = getExerciseConfig(exercise);
+            const bannerState = getGiantBannerState();
+            let customMsg: string | undefined;
+            if (bannerState === "SQUAT_DOWN") {
+              customMsg = activeCfg.actionPrompt;
+            } else if (bannerState === "HOLD_POSITION") {
+              customMsg = activeCfg.holdPrompt;
+            } else if (bannerState === "STAND_UP") {
+              customMsg = activeCfg.completePrompt;
+            } else if (bannerState === "EGO_LIFT") {
+              customMsg = combatBanner || activeCfg.faultPrompt;
+            }
+
+            return (
+              <GiantActionBanner
+                state={bannerState}
+                holdProgress={holdProgress}
+                targetHoldDuration={targetHoldDuration}
+                customMessage={customMsg}
+              />
+            );
+          })()}
 
           <div className="absolute bottom-4 left-6 z-20 flex items-center gap-2 text-xs text-slate-400">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/70 border border-slate-700/80 backdrop-blur-md">
@@ -6091,6 +6183,14 @@ export default function AthleteMindPage() {
           </div>
         </div>
       )}
+
+      {/* 10-Exercise Clinical Rehabilitation Suite Selector Modal */}
+      <ExerciseSelectorModal
+        isOpen={showExerciseSelector}
+        activeExerciseId={exercise}
+        onSelectExercise={(newEx) => handleSelectExercise(newEx as ExerciseType)}
+        onClose={() => setShowExerciseSelector(false)}
+      />
     </div>
   );
 }

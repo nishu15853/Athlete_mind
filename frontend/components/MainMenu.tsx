@@ -20,6 +20,8 @@ interface MainMenuProps {
   energyCores: number;
   callsign: string;
   rankTitle?: string;
+  activeExerciseName?: string;
+  onOpenExerciseSelector?: () => void;
   onNavigate: (view: ActiveView) => void;
 }
 
@@ -31,6 +33,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   energyCores,
   callsign,
   rankTitle = "Kinetic Stalker",
+  activeExerciseName = "Therapeutic Squat",
+  onOpenExerciseSelector,
   onNavigate,
 }) => {
   return (
@@ -88,6 +92,28 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         <p className="mt-2 text-xs sm:text-base font-mono text-slate-300 tracking-widest uppercase max-w-2xl">
           Clinical Physical Therapy & Gamified Deflection Gauntlet
         </p>
+
+        {/* Active Prescribed Exercise Pill */}
+        {onOpenExerciseSelector && (
+          <button
+            onClick={onOpenExerciseSelector}
+            className="mt-4 px-5 py-2.5 rounded-2xl bg-cyan-950/80 hover:bg-cyan-900/90 border border-cyan-500/60 hover:border-cyan-400 flex items-center gap-3 transition-all cursor-pointer shadow-[0_0_25px_rgba(0,240,255,0.25)] group"
+            title="Open 10-Exercise Clinical Rehabilitation Suite"
+          >
+            <span className="text-xl">🎯</span>
+            <div className="flex flex-col text-left">
+              <span className="text-[10px] text-slate-400 font-mono uppercase tracking-widest">
+                PRESCRIBED PROTOCOL
+              </span>
+              <span className="text-xs sm:text-sm font-black text-cyan-300 group-hover:text-white uppercase tracking-wider font-mono">
+                {activeExerciseName}
+              </span>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-400/40 ml-2 group-hover:bg-cyan-500 group-hover:text-black transition-all">
+              CHANGE ▾
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Primary Navigation Grid (7 High-Impact Neon Modules) */}
@@ -106,7 +132,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <div>
             <h2 className="text-xl sm:text-2xl font-black text-white group-hover:text-cyan-300 uppercase tracking-wider mb-1 transition-colors">
-              START COMBAT / SQUAT ARENA
+              START COMBAT / {activeExerciseName.toUpperCase()} ARENA
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-mono">
               Deflect high-mass incoming kinetic shockwaves by squatting and holding depth. 
