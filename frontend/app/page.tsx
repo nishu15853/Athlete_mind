@@ -33,6 +33,21 @@ interface BioEnginePacket {
   is_critical?: boolean;
 }
 
+interface AngleSample {
+  timestamp: number;
+  angle: number;
+}
+
+interface RepDetail {
+  repIndex: number;
+  minAngle: number;
+  holdDuration: number;
+  purityScore: number;
+  verdict: string;
+  faults: string;
+  timestamp: string;
+}
+
 interface Particle {
   x: number;
   y: number;
@@ -169,7 +184,6 @@ class AudioSynth {
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      // Heavy mechanized blast
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "square";
@@ -192,7 +206,7 @@ class AudioSynth {
     try {
       this.init();
       if (!this.ctx) return;
-      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+      const notes = [523.25, 659.25, 783.99, 1046.5];
       notes.forEach((freq, idx) => {
         const osc = this.ctx!.createOscillator();
         const gain = this.ctx!.createGain();
@@ -239,50 +253,55 @@ class AudioSynth {
 const synth = new AudioSynth();
 
 // ---------------------------------------------------------------------------
-// Phase 3: Cyberpunk Boss Battle Loop Main Component
+// Main Component: AthleteMind Phase 4 Clinician Telemetry
 // ---------------------------------------------------------------------------
 
-export default function CyberpunkBossBattlePage() {
+export default function Phase4ClinicianPage() {
   const [scriptReady, setScriptReady] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
-  // 1. Player State
+  // Combat State
   const [playerHp, setPlayerHp] = useState(100);
-  const [overheatMeter, setOverheatMeter] = useState(0); // 0 to 100%
-  const [stunTimer, setStunTimer] = useState(0); // seconds remaining
+  const [bossHp, setBossHp] = useState(500);
+  const [bossAttackTimer, setBossAttackTimer] = useState(10.0);
+  const [overheatMeter, setOverheatMeter] = useState(0);
+  const [stunTimer, setStunTimer] = useState(0);
   const [isStunned, setIsStunned] = useState(false);
 
-  // 2. Boss State ("Cyber-Colossus")
-  const [bossHp, setBossHp] = useState(500);
-  const [bossAttackTimer, setBossAttackTimer] = useState(10.0); // 10s idle countdown
   const isEnraged = bossHp > 0 && bossHp <= 250;
-  const isBossDefeated = bossHp <= 0;
-  const isPlayerDefeated = playerHp <= 0;
 
-  // Kinematic Readouts
+  // Kinematics & Metrics
   const [repCount, setRepCount] = useState(0);
   const [formPurity, setFormPurity] = useState(100);
   const [kneeAngle, setKneeAngle] = useState(180);
   const [hipAngle, setHipAngle] = useState(180);
   const [holdProgress, setHoldProgress] = useState(0);
 
-  // Combat Banner Callout
+  // Banner
   const [combatBanner, setCombatBanner] = useState("WAITING");
   const [combatBannerType, setCombatBannerType] = useState<"WAITING" | "HOLD" | "CRIT" | "EGO_LIFT" | "VALGUS">("WAITING");
 
-  // Game Flow Modals
+  // Game Flow & Clinician Modal
   const [matchStatus, setMatchStatus] = useState<"ACTIVE" | "VICTORY" | "DEFEAT">("ACTIVE");
+  const [showClinicianModal, setShowClinicianModal] = useState(false);
   const [battleStartTime, setBattleStartTime] = useState<number>(Date.now());
+
+  // Clinician Telemetry History
+  const [angleTrace, setAngleTrace] = useState<AngleSample[]>([]);
+  const [repDetails, setRepDetails] = useState<RepDetail[]>([]);
+  const [valgusCount, setValgusCount] = useState(0);
   const [egoLiftsCount, setEgoLiftsCount] = useState(0);
+  const [minSessionAngle, setMinSessionAngle] = useState(180);
+  const [holdDurations, setHoldDurations] = useState<number[]>([]);
 
   // DOM References
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Engine Refs (preventing React 60fps render-thrashing)
+  // Engine Refs
   const landmarksRef = useRef<any>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const poseInstanceRef = useRef<any>(null);
@@ -292,8 +311,9 @@ export default function CyberpunkBossBattlePage() {
   const floatingTextsRef = useRef<FloatingText[]>([]);
   const screenShakeRef = useRef(0);
   const lastHoldTickTimeRef = useRef(0);
+  const lastTraceSampleTimeRef = useRef(0);
 
-  // Fast access state mirrors for canvas render loop
+  // Fast access mirrors
   const kneeAngleRef = useRef(180);
   const holdProgressRef = useRef(0);
   const isStunnedRef = useRef(false);
@@ -304,7 +324,6 @@ export default function CyberpunkBossBattlePage() {
     isEnragedRef.current = isEnraged;
   }, [isEnraged]);
 
-  // Spawn visual neon particles
   const spawnParticles = useCallback((cx: number, cy: number, count = 25, color = "#00f0ff") => {
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
@@ -323,7 +342,6 @@ export default function CyberpunkBossBattlePage() {
     }
   }, []);
 
-  // Spawn floating combat damage numbers
   const spawnFloatingText = useCallback((text: string, x: number, y: number, color = "#ffd700", fontSize = 30) => {
     floatingTextsRef.current.push({
       id: Math.random().toString(),
@@ -338,7 +356,7 @@ export default function CyberpunkBossBattlePage() {
     });
   }, []);
 
-  // Reset Fight Session
+  // Reset Session
   const handleResetCombat = useCallback(() => {
     setPlayerHp(100);
     setBossHp(500);
@@ -354,8 +372,14 @@ export default function CyberpunkBossBattlePage() {
     setCombatBanner("READY • SQUAT DOWN");
     setCombatBannerType("WAITING");
     setMatchStatus("ACTIVE");
+    setShowClinicianModal(false);
     setBattleStartTime(Date.now());
+    setValgusCount(0);
     setEgoLiftsCount(0);
+    setMinSessionAngle(180);
+    setAngleTrace([]);
+    setRepDetails([]);
+    setHoldDurations([]);
 
     kneeAngleRef.current = 180;
     holdProgressRef.current = 0;
@@ -367,6 +391,10 @@ export default function CyberpunkBossBattlePage() {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ action: "reset" }));
     }
+
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/pose";
+    const httpUrl = wsUrl.replace(/^wss?:/, (m) => (m === "wss:" ? "https:" : "http:")).replace(/\/ws\/pose$/, "");
+    fetch(`${httpUrl}/api/session-reset`, { method: "POST" }).catch(() => {});
   }, []);
 
   const handleToggleMute = () => {
@@ -374,15 +402,52 @@ export default function CyberpunkBossBattlePage() {
     setIsMuted(!isMuted);
   };
 
-  // ---------------------------------------------------------------------------
-  // Boss Attack & Overheat Cool-down Timer Loop
-  // ---------------------------------------------------------------------------
+  // Download Clinical Telemetry CSV
+  const handleDownloadCsv = () => {
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/pose";
+    const httpUrl = wsUrl.replace(/^wss?:/, (m) => (m === "wss:" ? "https:" : "http:")).replace(/\/ws\/pose$/, "");
 
+    fetch(`${httpUrl}/api/export-report`)
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP error");
+        return res.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "athletemind_clinical_telemetry.csv";
+        a.click();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => {
+        // Fallback: Client-Side CSV generation
+        const headers = ["Rep_Index", "Min_Knee_Angle_Deg", "Hold_Duration_s", "Purity_Score_Pct", "Quality_Verdict", "Faults", "Timestamp"];
+        const rows = repDetails.map((r) => [
+          r.repIndex,
+          r.minAngle,
+          r.holdDuration,
+          r.purityScore,
+          r.verdict,
+          r.faults,
+          r.timestamp,
+        ]);
+        const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "athletemind_clinical_telemetry.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      });
+  };
+
+  // Boss Attack & Overheat Timer
   useEffect(() => {
     if (matchStatus !== "ACTIVE") return;
 
     const interval = setInterval(() => {
-      // 1. Cool down overheat meter & stun timer if active
       setStunTimer((prevStun) => {
         if (prevStun > 0) {
           const next = Math.max(0, prevStun - 0.1);
@@ -402,11 +467,9 @@ export default function CyberpunkBossBattlePage() {
         return 0;
       });
 
-      // 2. Boss Attack Timer: counts down every 100ms if player is not holding squat
       if (holdProgressRef.current === 0) {
         setBossAttackTimer((prevTimer) => {
           if (prevTimer <= 0.1) {
-            // Boss attacks! Deals 20 damage
             synth.playBossAttack();
             screenShakeRef.current = 22;
 
@@ -414,6 +477,7 @@ export default function CyberpunkBossBattlePage() {
               const nextHp = Math.max(0, hp - 20);
               if (nextHp <= 0) {
                 setMatchStatus("DEFEAT");
+                setShowClinicianModal(true);
                 synth.playDefeat();
               }
               return nextHp;
@@ -425,7 +489,7 @@ export default function CyberpunkBossBattlePage() {
               spawnFloatingText("-20 BOSS STRIKE!", canvas.width / 2, canvas.height / 2, "#ff0055", 34);
             }
 
-            return 10.0; // Reset boss timer
+            return 10.0;
           }
           return Math.max(0, Number((prevTimer - 0.1).toFixed(1)));
         });
@@ -435,19 +499,21 @@ export default function CyberpunkBossBattlePage() {
     return () => clearInterval(interval);
   }, [matchStatus, spawnParticles, spawnFloatingText]);
 
-  // Check victory / defeat trigger
+  // Match completion detection
   useEffect(() => {
     if (bossHp <= 0 && matchStatus === "ACTIVE") {
       setMatchStatus("VICTORY");
+      setShowClinicianModal(true);
       synth.playVictory();
     } else if (playerHp <= 0 && matchStatus === "ACTIVE") {
       setMatchStatus("DEFEAT");
+      setShowClinicianModal(true);
       synth.playDefeat();
     }
   }, [bossHp, playerHp, matchStatus]);
 
   // ---------------------------------------------------------------------------
-  // Canvas Render Loop (Decoupled, Zero-Flicker Hardware Pipeline)
+  // Canvas Render Loop
   // ---------------------------------------------------------------------------
 
   const renderCanvasPass = useCallback(() => {
@@ -477,7 +543,6 @@ export default function CyberpunkBossBattlePage() {
       ctx.drawImage(video, 0, 0, width, height);
       ctx.restore();
 
-      // Cyberpunk Ambient Arena Vignette
       const grad = ctx.createRadialGradient(width / 2, height / 2, width * 0.35, width / 2, height / 2, width * 0.75);
       if (isEnragedRef.current) {
         grad.addColorStop(0, "rgba(255, 0, 85, 0.04)");
@@ -497,7 +562,7 @@ export default function CyberpunkBossBattlePage() {
       ctx.fillText("TARGET ACQUISITION IN PROGRESS...", width / 2, height / 2);
     }
 
-    // 2. Corner Sci-Fi Tech Brackets
+    // 2. Corner Tech Brackets
     ctx.strokeStyle = isEnragedRef.current ? "rgba(255, 0, 85, 0.6)" : "rgba(0, 240, 255, 0.4)";
     ctx.lineWidth = 2.5;
     const bSize = 22;
@@ -526,7 +591,7 @@ export default function CyberpunkBossBattlePage() {
     ctx.lineTo(width - 14, height - 14 - bSize);
     ctx.stroke();
 
-    // 3. Draw Kinetic Cyberpunk Laser Skeleton
+    // 3. Kinetic Laser Skeleton & Circular Hold Gauge
     const landmarks = landmarksRef.current;
     if (landmarks && Array.isArray(landmarks) && landmarks.length >= 29) {
       const getPt = (idx: number) => {
@@ -580,7 +645,7 @@ export default function CyberpunkBossBattlePage() {
       drawBone(rSh, rEl, baseColor, 2.5);
       drawBone(rEl, rWr, baseColor, 2.5);
 
-      // Spine & Pelvis
+      // Spine
       if (lSh && rSh && lHip && rHip) {
         const midSh = { x: (lSh.x + rSh.x) / 2, y: (lSh.y + rSh.y) / 2 };
         const midHip = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
@@ -588,7 +653,7 @@ export default function CyberpunkBossBattlePage() {
         drawBone(lHip, rHip, baseColor, 4.0);
       }
 
-      // Lower Kinetic Chain (Squat Tracking)
+      // Lower Chain
       drawBone(lHip, lKnee, legColor, 4.5);
       drawBone(lKnee, lAnk, legColor, 4.5);
       drawBone(rHip, rKnee, legColor, 4.5);
@@ -621,7 +686,7 @@ export default function CyberpunkBossBattlePage() {
         ctx.restore();
       });
 
-      // Interactive Clinical Hold Circle on Active Knee
+      // Clinical Hold Arc around Active Knee
       const activeKnee = lKnee || rKnee;
       if (activeKnee && holdProgressRef.current > 0) {
         const radius = 32;
@@ -630,14 +695,12 @@ export default function CyberpunkBossBattlePage() {
         const endAngle = startAngle + Math.PI * 2 * progress;
 
         ctx.save();
-        // Track background circle
         ctx.beginPath();
         ctx.arc(activeKnee.x, activeKnee.y, radius, 0, Math.PI * 2);
         ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
         ctx.lineWidth = 4.5;
         ctx.stroke();
 
-        // Glowing progress arc
         ctx.beginPath();
         ctx.arc(activeKnee.x, activeKnee.y, radius, startAngle, endAngle);
         ctx.strokeStyle = "#ffd700";
@@ -646,7 +709,6 @@ export default function CyberpunkBossBattlePage() {
         ctx.shadowBlur = 14;
         ctx.stroke();
 
-        // Angle readout
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 13px monospace";
         ctx.textAlign = "center";
@@ -681,7 +743,7 @@ export default function CyberpunkBossBattlePage() {
       ctx.restore();
     }
 
-    // 5. Update & Render Floating Damage Numbers
+    // 5. Floating Numbers
     const texts = floatingTextsRef.current;
     for (let i = texts.length - 1; i >= 0; i--) {
       const t = texts[i];
@@ -715,7 +777,6 @@ export default function CyberpunkBossBattlePage() {
 
     let isRunning = true;
 
-    // 1. Initialize MediaPipe Pose instance
     const pose = new window.Pose({
       locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
     });
@@ -735,7 +796,6 @@ export default function CyberpunkBossBattlePage() {
       if (results.poseLandmarks) {
         landmarksRef.current = results.poseLandmarks;
 
-        // Stream Left & Right Hip, Knee, Ankle coordinates to backend WebSocket
         const socket = socketRef.current;
         if (socket && socket.readyState === WebSocket.OPEN) {
           const lms = results.poseLandmarks;
@@ -758,7 +818,6 @@ export default function CyberpunkBossBattlePage() {
       }
     });
 
-    // 2. Establish WebSocket Bio-Engine Connection
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/pose";
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
@@ -787,6 +846,18 @@ export default function CyberpunkBossBattlePage() {
         if (data.knee_angle !== undefined) {
           setKneeAngle(Math.round(data.knee_angle));
           kneeAngleRef.current = data.knee_angle;
+
+          if (data.knee_angle < minSessionAngle) {
+            setMinSessionAngle(Math.round(data.knee_angle));
+          }
+
+          // Sample 10Hz angle trace for clinician sparkline
+          const nowMs = Date.now();
+          if (nowMs - lastTraceSampleTimeRef.current >= 100) {
+            const elapsedSec = (nowMs - battleStartTime) / 1000;
+            setAngleTrace((prev) => [...prev.slice(-150), { timestamp: Number(elapsedSec.toFixed(1)), angle: data.knee_angle }]);
+            lastTraceSampleTimeRef.current = nowMs;
+          }
         }
 
         if (data.hip_angle !== undefined) {
@@ -807,7 +878,6 @@ export default function CyberpunkBossBattlePage() {
           holdProgressRef.current = data.hold_progress;
 
           if (data.hold_progress > 0) {
-            // Reset boss attack timer while user is actively performing a hold
             setBossAttackTimer(10.0);
 
             if (Date.now() - lastHoldTickTimeRef.current >= 280) {
@@ -817,7 +887,7 @@ export default function CyberpunkBossBattlePage() {
           }
         }
 
-        // Handle Ego Lift Stun Penalty (-25 HP & Overheat 100%)
+        // Handle Ego Lift Penalty (-25 HP & Overheat 100%)
         if (data.status === "penalty" || data.phase === "STUNNED" || (data.damage_taken && data.damage_taken > 0)) {
           setIsStunned(true);
           isStunnedRef.current = true;
@@ -848,13 +918,30 @@ export default function CyberpunkBossBattlePage() {
             synth.playCritHit();
             screenShakeRef.current = 16;
             setBossHp((prev) => Math.max(0, prev - data.damage!));
-            setBossAttackTimer(10.0); // Reset boss attack timer on landing hit
+            setBossAttackTimer(10.0);
 
             const canvas = canvasRef.current;
             if (canvas) {
               spawnParticles(canvas.width / 2, canvas.height * 0.6, 30, "#ffd700");
               spawnFloatingText(`-100 CRIT!`, canvas.width / 2, canvas.height * 0.4, "#ffd700", 36);
             }
+          }
+
+          if (data.event === "REP_COMPLETE") {
+            const holdDur = Math.max(1.5, data.hold_time || 1.5);
+            setHoldDurations((prev) => [...prev, holdDur]);
+            setRepDetails((prev) => [
+              ...prev,
+              {
+                repIndex: data.rep_count,
+                minAngle: Math.round(data.knee_angle),
+                holdDuration: holdDur,
+                purityScore: data.purity || 100,
+                verdict: data.valgus ? "VALGUS_FAULT" : "OPTIMAL",
+                faults: data.valgus ? "KNEE_VALGUS" : "NONE",
+                timestamp: new Date().toLocaleTimeString(),
+              },
+            ]);
           }
         } else if (data.phase === "HOLDING") {
           setIsStunned(false);
@@ -867,6 +954,7 @@ export default function CyberpunkBossBattlePage() {
           isStunnedRef.current = false;
           setCombatBanner("KNEES CAVING INWARD - DRIVE KNEES OUT");
           setCombatBannerType("VALGUS");
+          setValgusCount((v) => v + 1);
         } else {
           setIsStunned(false);
           isStunnedRef.current = false;
@@ -879,7 +967,6 @@ export default function CyberpunkBossBattlePage() {
       }
     };
 
-    // 3. Initialize Webcam Stream & Render Loop
     const startCamera = async () => {
       try {
         let stream = streamRef.current;
@@ -955,39 +1042,53 @@ export default function CyberpunkBossBattlePage() {
         socket.close();
       }
     };
-  }, [scriptReady, renderCanvasPass, spawnParticles, spawnFloatingText]);
+  }, [scriptReady, renderCanvasPass, spawnParticles, spawnFloatingText, battleStartTime, minSessionAngle]);
 
   const purityColor = formPurity >= 90 ? "text-emerald-400" : formPurity >= 70 ? "text-amber-400" : "text-rose-500";
   const durationSeconds = Math.round((Date.now() - battleStartTime) / 1000);
+  const avgHoldDuration = holdDurations.length > 0
+    ? Number((holdDurations.reduce((a, b) => a + b, 0) / holdDurations.length).toFixed(2))
+    : 1.5;
+
+  // Rules-Based Clinical Recommendation Generator
+  const getClinicalRecommendation = () => {
+    if (valgusCount > 2) {
+      return "Target hip abductors & gluteus medius to eliminate medial knee collapse. Recommended intervention: banded clamshells and lateral monster walks.";
+    }
+    if (egoLiftsCount > 0) {
+      return "Pacing violation: reduce repetition cadence to prevent compensatory bouncing and lumbar spine hyperextension.";
+    }
+    if (minSessionAngle > 95) {
+      return "Limited squat depth: focus on ankle dorsiflexion and hip adductor mobility to achieve parallel (< 90°) depth.";
+    }
+    return "Optimal joint kinematics detected: bilateral knee and hip trajectories show clinical symmetry and sustained eccentric control.";
+  };
 
   return (
     <div className="relative w-screen h-screen bg-[#050811] text-white flex flex-col font-mono select-none overflow-hidden">
-      {/* MediaPipe Pose Script */}
       <Script
         src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"
         strategy="afterInteractive"
         onLoad={() => setScriptReady(true)}
       />
 
-      {/* Hidden Hardware Camera Stream */}
       <video ref={videoRef} className="hidden" playsInline muted autoPlay />
 
       {/* ------------------------------------------------------------------- */}
-      {/* 1. TOP BAR: DUAL HEALTH BARS & BOSS BATTLE HUD                     */}
+      {/* 1. TOP BAR: DUAL COMBAT HUD & CLINICIAN SHORTCUT                   */}
       {/* ------------------------------------------------------------------- */}
       <header className="relative z-20 flex items-center justify-between px-6 py-3 bg-[#0a0f1d]/95 border-b border-cyan-500/20 backdrop-blur-md">
-        {/* Left: Player HP & Overheat Meter */}
-        <div className="flex items-center gap-4 w-80">
+        {/* Left: Player HP & Overheat */}
+        <div className="flex items-center gap-4 w-76">
           <div className="w-11 h-11 rounded-2xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 text-xl shadow-[0_0_15px_rgba(6,182,212,0.3)]">
             🛡️
           </div>
           <div className="flex-1">
             <div className="flex justify-between text-xs font-bold tracking-wider text-cyan-300 mb-1">
-              <span>PLAYER HEALTH</span>
-              <span>{playerHp} / 100 HP</span>
+              <span>PILOT HP</span>
+              <span>{playerHp} / 100</span>
             </div>
-            {/* Player HP Bar */}
-            <div className="h-3.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-cyan-500/30 mb-1.5">
+            <div className="h-3 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-cyan-500/30 mb-1">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   playerHp > 40
@@ -997,68 +1098,54 @@ export default function CyberpunkBossBattlePage() {
                 style={{ width: `${Math.max(0, Math.min(100, playerHp))}%` }}
               />
             </div>
-            {/* Overheat / Stun Gauge */}
-            <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold mb-0.5">
+            <div className="flex items-center justify-between text-[10px] text-slate-400">
               <span>OVERHEAT</span>
               <span>{stunTimer > 0 ? `STUNNED (${stunTimer.toFixed(1)}s)` : `${Math.round(overheatMeter)}%`}</span>
-            </div>
-            <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700">
-              <div
-                className={`h-full transition-all duration-200 ${
-                  overheatMeter > 70 ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]" : "bg-amber-400"
-                }`}
-                style={{ width: `${Math.min(100, overheatMeter)}%` }}
-              />
             </div>
           </div>
         </div>
 
-        {/* Center: Live Reps, Purity, Angles, & Boss Attack Timer */}
-        <div className="flex items-center gap-6">
-          {/* Rep Counter */}
-          <div className="text-center px-4 py-1.5 rounded-xl bg-black/60 border border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
-            <div className="text-[10px] text-cyan-400 font-semibold tracking-widest uppercase">Repetitions</div>
-            <div className="text-3xl font-black text-cyan-300 font-mono tracking-tight drop-shadow-[0_0_10px_rgba(0,240,255,0.6)]">
+        {/* Center: Live Telemetry */}
+        <div className="flex items-center gap-5">
+          <div className="text-center px-4 py-1 rounded-xl bg-black/60 border border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
+            <div className="text-[10px] text-cyan-400 font-semibold tracking-widest uppercase">Reps</div>
+            <div className="text-3xl font-black text-cyan-300 font-mono tracking-tight">
               {repCount.toString().padStart(2, "0")}
             </div>
           </div>
 
-          {/* Form Purity Metric */}
-          <div className="text-center px-4 py-1.5 rounded-xl bg-black/60 border border-cyan-500/30">
-            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Form Purity</div>
-            <div className={`text-2xl font-black ${purityColor} tracking-tight drop-shadow`}>
+          <div className="text-center px-4 py-1 rounded-xl bg-black/60 border border-cyan-500/30">
+            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Purity</div>
+            <div className={`text-2xl font-black ${purityColor} tracking-tight`}>
               {formPurity}%
             </div>
           </div>
 
-          {/* Angles Live */}
-          <div className="text-center px-3.5 py-1.5 rounded-xl bg-black/60 border border-slate-700/50">
-            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Knee / Hip</div>
+          <div className="text-center px-3.5 py-1 rounded-xl bg-black/60 border border-slate-700/50">
+            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Knee/Hip</div>
             <div className="text-base font-bold text-slate-200 tracking-tight font-mono">
               {kneeAngle}° / {hipAngle}°
             </div>
           </div>
 
-          {/* Boss Attack Countdown Timer */}
-          <div className="text-center px-4 py-1.5 rounded-xl bg-black/60 border border-rose-500/40 shadow-[0_0_15px_rgba(244,63,94,0.15)]">
+          <div className="text-center px-3.5 py-1 rounded-xl bg-black/60 border border-rose-500/40">
             <div className="text-[10px] text-rose-400 font-semibold tracking-widest uppercase">Boss Attack</div>
-            <div className={`text-xl font-black font-mono tracking-tight ${bossAttackTimer <= 3.0 ? "text-rose-400 animate-ping" : "text-amber-300"}`}>
+            <div className={`text-lg font-black font-mono tracking-tight ${bossAttackTimer <= 3.0 ? "text-rose-400 animate-ping" : "text-amber-300"}`}>
               {bossAttackTimer.toFixed(1)}s
             </div>
           </div>
         </div>
 
-        {/* Right: Boss HP & Active Status Badge */}
+        {/* Right: Boss HP & Clinician Button */}
         <div className="flex items-center gap-4 w-88 justify-end">
           <div className="flex-1 text-right">
             <div className="flex justify-between text-xs font-bold tracking-wider mb-1">
               <span className={isEnraged ? "text-rose-500 animate-pulse font-black" : "text-violet-400"}>
                 {isEnraged ? "🔥 CYBER-COLOSSUS [ENRAGED]" : "CYBER-COLOSSUS"}
               </span>
-              <span className="text-rose-300">{bossHp} / 500 HP</span>
+              <span className="text-rose-300">{bossHp} / 500</span>
             </div>
-            {/* Boss HP Bar */}
-            <div className="h-3.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-rose-500/40 mb-1.5">
+            <div className="h-3 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-rose-500/40 mb-1">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   isEnraged
@@ -1068,26 +1155,23 @@ export default function CyberpunkBossBattlePage() {
                 style={{ width: `${Math.max(0, Math.min(100, (bossHp / 500) * 100))}%` }}
               />
             </div>
-            {/* Boss Status Badge */}
-            <div className="flex items-center justify-end gap-2 text-[10px] font-bold">
-              <span className="text-slate-400">STATUS:</span>
-              <span className={`px-2 py-0.5 rounded-full ${isEnraged ? "bg-rose-950 text-rose-300 border border-rose-500" : "bg-violet-950 text-violet-300 border border-violet-500"}`}>
-                {isEnraged ? "ENRAGED" : bossAttackTimer <= 3.0 ? "CHARGING ATTACK" : "IDLE"}
-              </span>
-            </div>
           </div>
-          <div className={`w-11 h-11 rounded-2xl bg-rose-950/80 border flex items-center justify-center text-xl shadow-lg ${isEnraged ? "border-rose-400 text-rose-300 shadow-[0_0_18px_rgba(244,63,94,0.6)] animate-bounce" : "border-rose-500/40 text-rose-400"}`}>
-            👾
-          </div>
+
+          <button
+            onClick={() => setShowClinicianModal(true)}
+            className="px-3 py-2 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/40 text-xs font-bold text-emerald-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1.5"
+            title="Open Clinician Debrief"
+          >
+            <span>📊 CLINICIAN</span>
+          </button>
         </div>
       </header>
 
       {/* ------------------------------------------------------------------- */}
-      {/* 2. MAIN ARENA VIEWPORT (Single-Canvas Pipeline)                     */}
+      {/* 2. MAIN ARENA VIEWPORT                                              */}
       {/* ------------------------------------------------------------------- */}
       <main className="relative flex-1 w-full h-full flex items-center justify-center p-4 bg-gradient-to-b from-[#050811] via-[#080d1a] to-[#04060d]">
         <div className="relative w-full max-w-5xl aspect-[4/3] max-h-[80vh] rounded-3xl overflow-hidden border-2 border-cyan-500/30 shadow-[0_0_50px_rgba(0,240,255,0.12)] bg-black">
-          {/* Hardware Render Canvas */}
           <canvas
             ref={canvasRef}
             width={640}
@@ -1095,7 +1179,7 @@ export default function CyberpunkBossBattlePage() {
             className="w-full h-full object-cover"
           />
 
-          {/* Dynamic Center Combat Feedback Banner */}
+          {/* Center Feedback Banner */}
           <div className="absolute top-6 left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">
             <div
               className={`px-8 py-3 rounded-2xl border-2 backdrop-blur-md transition-all duration-200 uppercase font-black tracking-widest text-sm sm:text-base flex items-center gap-3 shadow-2xl ${
@@ -1124,7 +1208,6 @@ export default function CyberpunkBossBattlePage() {
               <span>{combatBanner}</span>
             </div>
 
-            {/* Hold progress bar under banner */}
             {holdProgress > 0 && (
               <div className="w-64 mx-auto mt-2 h-2 bg-slate-900/90 rounded-full overflow-hidden border border-cyan-400/40 p-0.5">
                 <div
@@ -1135,18 +1218,16 @@ export default function CyberpunkBossBattlePage() {
             )}
           </div>
 
-          {/* Viewport Corner Status Footer */}
           <div className="absolute bottom-4 left-6 z-20 flex items-center gap-3 text-xs text-slate-400">
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 border border-slate-700">
               <span className={`w-2 h-2 rounded-full ${cameraActive ? "bg-emerald-400" : "bg-amber-400"}`} />
-              <span>{cameraActive ? "CAMERA ONLINE (640x480)" : "INITIALIZING CAMERA..."}</span>
+              <span>{cameraActive ? "OPTICAL SENSOR ACTIVE" : "CONNECTING CAMERA..."}</span>
             </div>
             <div className="px-3 py-1 rounded-full bg-black/60 border border-slate-700 text-cyan-300">
               CLINICAL HOLD: 1.5s
             </div>
           </div>
 
-          {/* Quick HUD Controls */}
           <div className="absolute bottom-4 right-6 z-20 flex items-center gap-3">
             <button
               onClick={handleToggleMute}
@@ -1165,86 +1246,142 @@ export default function CyberpunkBossBattlePage() {
       </main>
 
       {/* ------------------------------------------------------------------- */}
-      {/* 3. GAME FLOW MODALS (Victory Screen & Defeat Screen)                */}
+      {/* 3. PHASE 4 CLINICIAN MODE / POST-MISSION DEBRIEF MODAL              */}
       {/* ------------------------------------------------------------------- */}
-
-      {/* Victory Screen */}
-      {matchStatus === "VICTORY" && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4">
-          <div className="relative w-full max-w-lg bg-[#0a101f] border-2 border-amber-400/50 rounded-3xl p-8 shadow-[0_0_60px_rgba(251,191,36,0.3)] flex flex-col items-center text-center animate-in fade-in zoom-in duration-300">
-            <div className="w-16 h-16 rounded-2xl mb-4 bg-amber-950/80 border border-amber-400/60 flex items-center justify-center text-3xl shadow-[0_0_20px_rgba(251,191,36,0.4)]">
-              🏆
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-amber-300 uppercase tracking-wider mb-1 drop-shadow-[0_0_12px_rgba(251,191,36,0.6)]">
-              CYBER-COLOSSUS DESTROYED!
-            </h2>
-            <p className="text-xs text-slate-400 uppercase tracking-widest mb-6">
-              Mechanized Target Neutralized • Pure Kinematic Form Verified
-            </p>
-
-            <div className="grid grid-cols-3 gap-3 w-full mb-6">
-              <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center">
-                <span className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Total Reps</span>
-                <span className="text-2xl font-black text-cyan-300 font-mono">{repCount}</span>
+      {showClinicianModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <div className="relative w-full max-w-4xl bg-[#0a101f] border-2 border-cyan-500/40 rounded-3xl p-6 sm:p-8 shadow-[0_0_70px_rgba(0,240,255,0.25)] flex flex-col gap-6 animate-in fade-in zoom-in duration-300">
+            {/* Header with Outcome Banner */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-950/80 border border-cyan-400/50 flex items-center justify-center text-2xl shadow-[0_0_15px_rgba(6,182,212,0.4)]">
+                  {matchStatus === "VICTORY" ? "🏆" : matchStatus === "DEFEAT" ? "💀" : "📊"}
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-cyan-300">
+                    {matchStatus === "VICTORY"
+                      ? "TARGET DESTROYED • CLINICIAN DEBRIEF"
+                      : matchStatus === "DEFEAT"
+                      ? "MISSION FAILED • CLINICAL KINEMATIC DEBRIEF"
+                      : "CLINICIAN TELEMETRY OVERVIEW"}
+                  </h2>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest">
+                    Real-Time 3D Biomechanical Range of Motion & Stability Report
+                  </p>
+                </div>
               </div>
-              <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center">
-                <span className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Form Purity</span>
-                <span className={`text-2xl font-black font-mono ${purityColor}`}>{formPurity}%</span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center">
-                <span className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Battle Time</span>
-                <span className="text-2xl font-black text-amber-300 font-mono">{durationSeconds}s</span>
-              </div>
-            </div>
-
-            <div className="flex gap-3 w-full">
               <button
-                onClick={handleResetCombat}
-                className="flex-1 py-3 px-5 rounded-2xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-black font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_20px_rgba(251,191,36,0.4)]"
+                onClick={() => setShowClinicianModal(false)}
+                className="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold flex items-center justify-center cursor-pointer transition-all"
               >
-                ⚔️ NEXT TARGET / RESTART
+                ✕
               </button>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* Defeat Screen */}
-      {matchStatus === "DEFEAT" && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4">
-          <div className="relative w-full max-w-lg bg-[#14080e] border-2 border-rose-500/50 rounded-3xl p-8 shadow-[0_0_60px_rgba(244,63,94,0.3)] flex flex-col items-center text-center animate-in fade-in zoom-in duration-300">
-            <div className="w-16 h-16 rounded-2xl mb-4 bg-rose-950/80 border border-rose-500/60 flex items-center justify-center text-3xl shadow-[0_0_20px_rgba(244,63,94,0.4)]">
-              💀
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-rose-400 uppercase tracking-wider mb-1 drop-shadow-[0_0_12px_rgba(244,63,94,0.6)]">
-              SYSTEM OVERLOAD - DEFEATED
-            </h2>
-            <p className="text-xs text-slate-400 uppercase tracking-widest mb-6">
-              Critical Pilot Failure • Kinematic Fault Analysis
-            </p>
-
-            <div className="w-full mb-6 p-4 rounded-2xl bg-black/60 border border-rose-900/60 text-left text-xs space-y-2">
-              <div className="text-rose-300 font-bold uppercase tracking-wider mb-2">Diagnostic Feedback:</div>
-              <div className="flex items-center gap-2 text-slate-300">
-                <span>⚠️</span>
-                <span>Ego-Lift Penalties: <strong>{egoLiftsCount}</strong> rapid bounces recorded (-25 HP each)</span>
+            {/* 5-Metric Clinical Matrix */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center text-center">
+                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Total Reps</span>
+                <span className="text-2xl font-black text-cyan-300 font-mono">{repCount}</span>
               </div>
-              <div className="flex items-center gap-2 text-slate-300">
-                <span>⏱️</span>
-                <span>Boss Idle Attacks: Idle time allowed Cyber-Colossus to land 20 DMG strikes</span>
+              <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center text-center">
+                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Form Purity</span>
+                <span className={`text-2xl font-black font-mono ${purityColor}`}>{formPurity}%</span>
               </div>
-              <div className="flex items-center gap-2 text-slate-300">
-                <span>🎯</span>
-                <span>Recommendation: Hold squats below 90° for full 1.5s to deal damage and reset boss attacks</span>
+              <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center text-center">
+                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Mean Hold Time</span>
+                <span className="text-2xl font-black text-amber-300 font-mono">{avgHoldDuration}s</span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center text-center">
+                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Valgus Faults</span>
+                <span className={`text-2xl font-black font-mono ${valgusCount === 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  {valgusCount}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center text-center col-span-2 sm:col-span-1">
+                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Max Squat Depth</span>
+                <span className="text-2xl font-black text-emerald-400 font-mono">
+                  {minSessionAngle < 180 ? `${minSessionAngle}°` : "90°"}
+                </span>
               </div>
             </div>
 
-            <div className="flex gap-3 w-full">
+            {/* Visual Kinematic Trace (SVG Telemetry Sparkline) */}
+            <div className="p-4 rounded-2xl bg-black/60 border border-slate-800 flex flex-col gap-2">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span className="font-bold text-slate-300 uppercase tracking-wider">
+                  📈 Visual Kinematic Trace (Knee Angle Over Time)
+                </span>
+                <span className="text-[11px] text-emerald-400">
+                  Green Band = Clinical Depth (&lt; 90°) • Top Line = Standing (160°)
+                </span>
+              </div>
+
+              {/* SVG Sparkline */}
+              <div className="relative w-full h-44 bg-[#080d1a] rounded-xl overflow-hidden border border-slate-800 p-2">
+                <svg className="w-full h-full" viewBox="0 0 600 160" preserveAspectRatio="none">
+                  {/* Critical Depth Green Threshold Band (< 90 degrees) */}
+                  <rect x="0" y="80" width="600" height="80" fill="rgba(16, 185, 129, 0.12)" />
+                  <line x1="0" y1="80" x2="600" y2="80" stroke="#10b981" strokeWidth="1.5" strokeDasharray="4 4" />
+                  <text x="8" y="74" fill="#10b981" fontSize="10" fontFamily="monospace">90° CLINICAL DEPTH TARGET</text>
+
+                  {/* Standing Baseline (160 degrees) */}
+                  <line x1="0" y1="20" x2="600" y2="20" stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
+                  <text x="8" y="16" fill="#64748b" fontSize="10" fontFamily="monospace">160° STANDING UPRIGHT</text>
+
+                  {/* Kinematic Angle Polyline */}
+                  {angleTrace.length >= 2 ? (
+                    <polyline
+                      fill="none"
+                      stroke="#00f0ff"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      points={angleTrace
+                        .map((pt, idx) => {
+                          const x = (idx / (angleTrace.length - 1)) * 600;
+                          // Map angle: 180° -> y=10, 60° -> y=140
+                          const norm = Math.max(0, Math.min(1, (180 - pt.angle) / 120));
+                          const y = 10 + norm * 130;
+                          return `${x},${y}`;
+                        })
+                        .join(" ")}
+                    />
+                  ) : (
+                    <text x="300" y="90" fill="#64748b" fontSize="12" fontFamily="monospace" textAnchor="middle">
+                      Awaiting live kinematic repetitions data...
+                    </text>
+                  )}
+                </svg>
+              </div>
+            </div>
+
+            {/* Clinical Recommendation Callout */}
+            <div className="p-4 rounded-2xl bg-cyan-950/40 border border-cyan-500/30 flex items-start gap-3 text-left">
+              <span className="text-xl">🩺</span>
+              <div>
+                <div className="text-xs font-black uppercase tracking-wider text-cyan-300 mb-0.5">
+                  Clinical Recommendation & Biomechanical Assessment:
+                </div>
+                <div className="text-xs text-slate-300 leading-relaxed">
+                  {getClinicalRecommendation()}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 w-full">
+              <button
+                onClick={handleDownloadCsv}
+                className="flex-1 py-3 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-cyan-400 text-slate-200 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+              >
+                <span>📥 DOWNLOAD CLINICAL TELEMETRY (CSV)</span>
+              </button>
               <button
                 onClick={handleResetCombat}
-                className="flex-1 py-3 px-5 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_20px_rgba(244,63,94,0.5)]"
+                className="flex-1 py-3 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2"
               >
-                🔄 RETRY MISSION
+                <span>⚔️ NEXT TARGET / RESTART</span>
               </button>
             </div>
           </div>
