@@ -1384,16 +1384,173 @@ class RDLEngine(BaseExerciseEngine):
         )
 
 
+class GenericRehabEngine(BaseExerciseEngine):
+    """Modular engine for single leg balance, scaption, calf raise, high knee march, torso rotation, lateral lunge."""
+
+    def __init__(self, exercise_type: str, difficulty: str = "standard", telemetry: Optional[SessionTelemetryStore] = None, modifiers: Optional[List[str]] = None):
+        super().__init__(exercise_type, difficulty, telemetry, modifiers=modifiers)
+
+    def process(self, hip: Any, shoulder: Any, elbow: Any, knee: Any = None,
+                wrist: Any = None, ankle: Any = None, now: Optional[float] = None, **kwargs) -> Dict[str, Any]:
+        if now is None:
+            now = time.time()
+
+        target_hold = 1.5
+        if self.difficulty == "rehab":
+            target_hold = 1.0
+        elif self.difficulty == "athlete":
+            target_hold = 2.0
+        if "HYPER_TENSION" in self.modifiers:
+            target_hold = 3.0
+
+        ex = self.exercise_type.lower()
+        primary_ang = 180.0
+        secondary_ang = 180.0
+        primary_name = "Joint Angle"
+        secondary_name = "Secondary"
+        active_joint = 23
+        is_depth = False
+        fault_detected = False
+        fault_type = ""
+        fault_message = ""
+        fault_joints: List[int] = []
+
+        if ex in ("single_leg_balance", "single_leg", "balance"):
+            primary_name = "Trunk Sway"
+            secondary_name = "Pelvis Level"
+            active_joint = 27
+            target_hold = 3.0
+            left_ankle = kwargs.get("left_ankle") or ankle
+            right_ankle = kwargs.get("right_ankle")
+            if left_ankle and right_ankle:
+                dy = abs(float(left_ankle[1]) - float(right_ankle[1]))
+                is_depth = dy >= 0.07
+                primary_ang = round(dy * 1000, 1)
+            else:
+                is_depth = False
+                primary_ang = 180.0
+
+        elif ex == "scaption":
+            primary_name = "Abduction"
+            secondary_name = "Scapular Shrug"
+            active_joint = 11
+            target_hold = 1.0
+            primary_ang = calculate_angle_3d(hip, shoulder, elbow)
+            is_depth = 75.0 <= primary_ang <= 110.0
+
+        elif ex == "calf_raise":
+            primary_name = "Plantar Lift"
+            secondary_name = "Symmetry"
+            active_joint = 27
+            target_hold = 2.0
+            is_depth = True
+            primary_ang = 100.0
+
+        elif ex == "high_knee_march":
+            primary_name = "Hip Flexion"
+            secondary_name = "Torso Lean"
+            active_joint = 25
+            target_hold = 1.5
+            primary_ang = calculate_angle_3d(shoulder, hip, knee)
+            is_depth = primary_ang <= 100.0
+
+        elif ex == "torso_rotation":
+            primary_name = "Thoracic Twist"
+            secondary_name = "Pelvis Drift"
+            active_joint = 11
+            target_hold = 1.5
+            primary_ang = 35.0
+            is_depth = True
+
+        elif ex == "lateral_lunge":
+            primary_name = "Lunge Depth"
+            secondary_name = "Trail Knee"
+            active_joint = 25
+            target_hold = 1.5
+            primary_ang = calculate_angle_3d(hip, knee, ankle)
+            is_depth = primary_ang <= 110.0
+
+        else:
+            primary_ang = calculate_angle_3d(hip, knee, ankle)
+            is_depth = primary_ang <= 95.0
+
+        primary_ang, secondary_ang = self._smooth_angles(primary_ang, secondary_ang)
+
+        status = "TRACKING"
+        damage = 0
+        message = f"EXECUTE {ex.replace('_', ' ').upper()}"
+        audio_cue = ""
+        event = "FRAME"
+
+        if is_depth:
+            self.phase = "HOLDING"
+            if self.hold_start_time is None:
+                self.hold_start_time = now
+            self.hold_duration = now - self.hold_start_time
+
+            if self.hold_duration >= target_hold:
+                status = "hit"
+                damage = 100
+                message = f"CRITICAL HIT! {ex.upper()} DEFLECTION COMPLETE!"
+                audio_cue = "Deflection complete, reset stance"
+                event = "HOLD_HIT"
+                self.rep_hit_awarded = True
+            else:
+                status = "HOLDING"
+                message = f"HOLD POSITION... ({self.hold_duration:.1f}s / {target_hold}s)"
+        else:
+            if now - (self.hold_start_time or 0) > 0.6:
+                self.hold_start_time = None
+                self.hold_duration = 0.0
+            if self.phase == "HOLDING" and self.rep_hit_awarded:
+                self.rep_count += 1
+                self.rep_hit_awarded = False
+                event = "REP_COMPLETE"
+                message = f"REP {self.rep_count} REGISTERED!"
+                self.telemetry.record_rep(
+                    exercise_type=ex,
+                    depth_angle=primary_ang,
+                    hold_time=target_hold,
+                    purity=100.0,
+                    had_fault=False,
+                    fault_name="",
+                )
+            self.phase = "STARTING"
+
+        return self._build_base_payload(
+            status=status,
+            phase=self.phase,
+            primary_ang=primary_ang,
+            primary_name=primary_name,
+            secondary_ang=secondary_ang,
+            secondary_name=secondary_name,
+            hold_dur=self.hold_duration,
+            target_hold=target_hold,
+            damage=damage,
+            damage_taken=0,
+            has_fault=fault_detected,
+            fault_type=fault_type,
+            overheated=False,
+            message=message,
+            audio_cue=audio_cue,
+            event=event,
+            active_joint_idx=active_joint,
+            fault_joint_indices=fault_joints,
+        )
+
+
 def create_exercise_engine(exercise_type: str, difficulty: str = "standard", telemetry: Optional[SessionTelemetryStore] = None, modifiers: Optional[List[str]] = None) -> BaseExerciseEngine:
     """Factory function for instantiating exercise processors."""
     ex = exercise_type.lower()
     mods = modifiers or []
-    if ex in ("pushups", "pushup", "push_ups", "push_up"):
+    if ex in ("pushups", "pushup", "push_ups", "push_up", "wall_pushup"):
         return PushUpEngine(telemetry, difficulty, modifiers=mods)
     elif ex in ("overhead_press", "overhead", "ohp", "shoulder_press"):
         return OverheadPressEngine(telemetry, difficulty, modifiers=mods)
     elif ex in ("rdl", "romanian_deadlift", "hip_hinge"):
         return RDLEngine(telemetry, difficulty, modifiers=mods)
+    elif ex in ("single_leg_balance", "single_leg", "balance", "scaption", "calf_raise", "high_knee_march", "torso_rotation", "lateral_lunge"):
+        return GenericRehabEngine(ex, difficulty, telemetry, modifiers=mods)
     return SquatEngine(telemetry, difficulty, modifiers=mods)
 
 

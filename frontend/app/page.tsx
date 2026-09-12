@@ -14,6 +14,7 @@ import { ClinicalSoapCard } from "@/components/ClinicalSoapCard";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
 import {
   EXERCISE_CONFIGS,
+  EXERCISE_REGISTRY,
   EXERCISE_LIST,
   getExerciseConfig,
   ExerciseConfig,
@@ -1558,6 +1559,8 @@ export default function AthleteMindPage() {
 
   // Exercise & Difficulty Configuration
   const [exercise, setExercise] = useState<ExerciseType>("squats");
+  const [selectedExercise, setSelectedExercise] = useState<string>("squats");
+  const activeExerciseRef = useRef<string>("squats");
   const [difficulty, setDifficulty] = useState<DifficultyType>("standard");
   const [orientationView, setOrientationView] = useState<string>("front");
   const [activeProfile, setActiveProfile] = useState<"SIDE" | "FRONT">("FRONT");
@@ -1571,6 +1574,13 @@ export default function AthleteMindPage() {
   const [secondaryAngleName, setSecondaryAngleName] = useState("Hip");
   const [activeJointIdx, setActiveJointIdx] = useState(25);
   const [faultJointIndices, setFaultJointIndices] = useState<number[]>([]);
+
+  // Dynamically Dispatched Exercise HUD Variables
+  const [currentDisplayAngle, setCurrentDisplayAngle] = useState<number>(180);
+  const [isHolding, setIsHolding] = useState<boolean>(false);
+  const [isDepthTargetMet, setIsDepthTargetMet] = useState<boolean>(false);
+  const [hasFault, setHasFault] = useState<boolean>(false);
+  const [faultFeedback, setFaultFeedback] = useState<string>("");
 
   // Combat State
   const [playerHp, setPlayerHp] = useState(100);
@@ -1743,8 +1753,20 @@ export default function AthleteMindPage() {
   }, [isEnraged]);
 
   useEffect(() => {
-    exerciseRef.current = exercise;
-  }, [exercise]);
+    activeExerciseRef.current = selectedExercise;
+    exerciseRef.current = selectedExercise as ExerciseType;
+    if (exercise !== selectedExercise) {
+      setExercise(selectedExercise as ExerciseType);
+    }
+  }, [selectedExercise, exercise]);
+
+  useEffect(() => {
+    if (exercise !== selectedExercise) {
+      setSelectedExercise(exercise);
+      activeExerciseRef.current = exercise;
+      exerciseRef.current = exercise;
+    }
+  }, [exercise, selectedExercise]);
 
   useEffect(() => {
     difficultyRef.current = difficulty;
@@ -2084,15 +2106,24 @@ export default function AthleteMindPage() {
   }, []);
 
   // Exercise Change Handler
-  const handleSelectExercise = (newEx: ExerciseType) => {
-    setExercise(newEx);
-    exerciseRef.current = newEx;
-    const config = getExerciseConfig(newEx);
+  const handleSelectExercise = (newEx: string | ExerciseType) => {
+    const exType = newEx as ExerciseType;
+    setExercise(exType);
+    setSelectedExercise(newEx);
+    activeExerciseRef.current = newEx;
+    exerciseRef.current = exType;
+    const config = EXERCISE_REGISTRY[newEx] || getExerciseConfig(newEx);
     setPrimaryAngleName(config.primaryAngleName);
     setSecondaryAngleName(config.secondaryAngleName);
     setActiveJointIdx(config.defaultActiveJointIndex);
     activeJointIdxRef.current = config.defaultActiveJointIndex;
     setTargetHoldDuration(config.deflectionHoldTime);
+    setHoldProgress(0);
+    holdProgressRef.current = 0;
+    setIsDepthTargetMet(false);
+    setIsHolding(false);
+    setHasFault(false);
+    setFaultFeedback("");
 
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(
@@ -2488,22 +2519,25 @@ export default function AthleteMindPage() {
 
   const getGiantBannerState = useCallback((): BannerState => {
     if (
+      hasFault ||
       combatBannerType === "EGO_LIFT" ||
       combatBannerType === "FAULT" ||
       combatBanner.includes("EGO") ||
       combatBanner.includes("CAVE") ||
       combatBanner.includes("VALGUS") ||
-      combatBanner.includes("PENALTY")
+      combatBanner.includes("PENALTY") ||
+      combatBanner.includes("FAULT")
     ) {
       return "EGO_LIFT";
     }
     if (incomingAttack) {
       return "PARRY_ATTACK";
     }
-    if (holdProgress > 0 && holdProgress < 1) {
+    if (isHolding || (holdProgress > 0 && holdProgress < 1)) {
       return "HOLD_POSITION";
     }
     if (
+      isDepthTargetMet ||
       holdProgress >= 1 ||
       combatBannerType === "CRIT" ||
       combatBanner.includes("STAND") ||
@@ -2513,7 +2547,7 @@ export default function AthleteMindPage() {
       return "STAND_UP";
     }
     return "SQUAT_DOWN";
-  }, [combatBannerType, combatBanner, incomingAttack, holdProgress]);
+  }, [hasFault, combatBannerType, combatBanner, incomingAttack, isHolding, holdProgress, isDepthTargetMet]);
 
   // ---------------------------------------------------------------------------
   // Lifecycle Finite State Machine & Session Controls
@@ -3028,17 +3062,30 @@ export default function AthleteMindPage() {
       const lAnk = getPt(27);
       const rAnk = getPt(28);
 
+      // Dynamic Joint Visualizer: Upper body vs Lower body highlight
+      const currentExerciseConfig = EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"];
+      const region = currentExerciseConfig.targetRegion;
+      const isUpper = region === "UPPER_BODY";
+      const isLower = region === "LOWER_BODY" || region === "BALANCE";
+      const isSpine = region === "SPINE";
+      const isBalance = region === "BALANCE";
+
+      const armLineWidth = isUpper ? 4.5 : 1.5;
+      const legLineWidth = isLower ? 4.5 : 1.5;
+      const spineLineWidth = isSpine || isBalance ? 4.5 : 3.0;
+
       const isFaultJoint = (idx1: number, idx2: number) => {
         const faults = faultJointIndicesRef.current;
         return faults.includes(idx1) || faults.includes(idx2);
       };
 
-      const getBoneColor = (idx1: number, idx2: number) => {
+      const getBoneColor = (idx1: number, idx2: number, isDim: boolean = false) => {
         if (isStunnedRef.current) return "#ff0055";
-        if (isFaultJoint(idx1, idx2)) return "#ff2a5f"; // Red / Yellow alert
+        if (isFaultJoint(idx1, idx2)) return "#ff2a5f"; // Red alert
+        if (isDim) return "rgba(100, 140, 180, 0.25)"; // Faint line for non-tracking limbs
         if (holdProgressRef.current >= 1.0) return currentShader.targetColor;
         if (holdProgressRef.current > 0) return currentShader.holdingColor;
-        return currentShader.baseColor;
+        return isUpper ? "#00f0ff" : currentShader.baseColor;
       };
 
       const drawBone = (p1: any, p2: any, color: string, lineWidth = 3.5) => {
@@ -3050,68 +3097,90 @@ export default function AthleteMindPage() {
         ctx.strokeStyle = color;
         ctx.lineWidth = lineWidth;
         ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = lineWidth > 2 ? 12 : 0;
         ctx.lineCap = "round";
         ctx.stroke();
         ctx.restore();
       };
 
-      // Arms
-      drawBone(lSh, rSh, getBoneColor(11, 12), 3.5);
-      drawBone(lSh, lEl, getBoneColor(11, 13), 3.5);
-      drawBone(lEl, lWr, getBoneColor(13, 15), 3.5);
-      drawBone(rSh, rEl, getBoneColor(12, 14), 3.5);
-      drawBone(rEl, rWr, getBoneColor(14, 16), 3.5);
+      // Arms (Prominently highlighted with cyan glow for Upper Body)
+      drawBone(lSh, rSh, getBoneColor(11, 12, !isUpper && !isSpine), armLineWidth);
+      drawBone(lSh, lEl, getBoneColor(11, 13, !isUpper), armLineWidth);
+      drawBone(lEl, lWr, getBoneColor(13, 15, !isUpper), armLineWidth);
+      drawBone(rSh, rEl, getBoneColor(12, 14, !isUpper), armLineWidth);
+      drawBone(rEl, rWr, getBoneColor(14, 16, !isUpper), armLineWidth);
 
       // Spine & Pelvis
       if (lSh && rSh && lHip && rHip) {
         const midSh = { x: (lSh.x + rSh.x) / 2, y: (lSh.y + rSh.y) / 2 };
         const midHip = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
-        drawBone(midSh, midHip, getBoneColor(11, 23), 4.0);
-        drawBone(lHip, rHip, getBoneColor(23, 24), 4.0);
+        drawBone(midSh, midHip, getBoneColor(11, 23, !isSpine && !isBalance), spineLineWidth);
+        drawBone(lHip, rHip, getBoneColor(23, 24, !isLower && !isSpine), spineLineWidth);
       }
 
-      // Legs
-      drawBone(lHip, lKnee, getBoneColor(23, 25), 4.5);
-      drawBone(lKnee, lAnk, getBoneColor(25, 27), 4.5);
-      drawBone(rHip, rKnee, getBoneColor(24, 26), 4.5);
-      drawBone(rKnee, rAnk, getBoneColor(26, 28), 4.5);
+      // Legs (Prominently highlighted for Lower Body / Balance, faint for Upper Body)
+      drawBone(lHip, lKnee, getBoneColor(23, 25, !isLower), legLineWidth);
+      drawBone(lKnee, lAnk, getBoneColor(25, 27, !isLower), legLineWidth);
+      drawBone(rHip, rKnee, getBoneColor(24, 26, !isLower), legLineWidth);
+      drawBone(rKnee, rAnk, getBoneColor(26, 28, !isLower), legLineWidth);
 
-      // Joint Halos
+      // Balance Plumb Line Overlay for Single-Leg Balance
+      if (isBalance && lSh && rSh && (lAnk || rAnk)) {
+        const midSh = { x: (lSh.x + rSh.x) / 2, y: (lSh.y + rSh.y) / 2 };
+        const stanceAnk = lAnk && rAnk ? (lAnk.y > rAnk.y ? lAnk : rAnk) : (lAnk || rAnk);
+        if (stanceAnk) {
+          ctx.save();
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = "rgba(0, 240, 255, 0.45)";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(midSh.x, midSh.y);
+          ctx.lineTo(stanceAnk.x, stanceAnk.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // Dynamic Joint Halos
       const joints = [
-        { pt: lSh, idx: 11, r: 5 },
-        { pt: rSh, idx: 12, r: 5 },
-        { pt: lEl, idx: 13, r: 5 },
-        { pt: rEl, idx: 14, r: 5 },
-        { pt: lWr, idx: 15, r: 4 },
-        { pt: rWr, idx: 16, r: 4 },
-        { pt: lHip, idx: 23, r: 6 },
-        { pt: rHip, idx: 24, r: 6 },
-        { pt: lKnee, idx: 25, r: 7 },
-        { pt: rKnee, idx: 26, r: 7 },
-        { pt: lAnk, idx: 27, r: 5 },
-        { pt: rAnk, idx: 28, r: 5 },
+        { pt: lSh, idx: 11, r: isUpper || isSpine ? 7 : 4, isUpperBone: true },
+        { pt: rSh, idx: 12, r: isUpper || isSpine ? 7 : 4, isUpperBone: true },
+        { pt: lEl, idx: 13, r: isUpper ? 7 : 3, isUpperBone: true },
+        { pt: rEl, idx: 14, r: isUpper ? 7 : 3, isUpperBone: true },
+        { pt: lWr, idx: 15, r: isUpper ? 7 : 3, isUpperBone: true },
+        { pt: rWr, idx: 16, r: isUpper ? 7 : 3, isUpperBone: true },
+        { pt: lHip, idx: 23, r: isLower || isSpine ? 7 : 4, isUpperBone: false },
+        { pt: rHip, idx: 24, r: isLower || isSpine ? 7 : 4, isUpperBone: false },
+        { pt: lKnee, idx: 25, r: isLower ? 8 : 3, isUpperBone: false },
+        { pt: rKnee, idx: 26, r: isLower ? 8 : 3, isUpperBone: false },
+        { pt: lAnk, idx: 27, r: isLower ? 6 : 3, isUpperBone: false },
+        { pt: rAnk, idx: 28, r: isLower ? 6 : 3, isUpperBone: false },
       ];
 
-      joints.forEach(({ pt, idx, r }) => {
+      joints.forEach(({ pt, idx, r, isUpperBone }) => {
         if (!pt) return;
+        const isTargetTracking = (isUpper && isUpperBone) || (isLower && !isUpperBone) || isSpine;
         const col = isFaultJoint(idx, idx)
           ? "#ff2a5f"
           : idx === activeJointIdxRef.current
           ? holdProgressRef.current >= 1.0
             ? currentShader.targetColor
             : currentShader.holdingColor
-          : currentShader.baseColor;
+          : isTargetTracking
+          ? (isUpper ? "#00f0ff" : currentShader.baseColor)
+          : "rgba(100, 140, 180, 0.35)";
 
         ctx.save();
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
         ctx.fillStyle = col;
-        ctx.shadowColor = col;
-        ctx.shadowBlur = 12;
+        if (isTargetTracking || idx === activeJointIdxRef.current) {
+          ctx.shadowColor = col;
+          ctx.shadowBlur = 16;
+        }
         ctx.fill();
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = isTargetTracking ? "#ffffff" : "rgba(255, 255, 255, 0.35)";
+        ctx.lineWidth = isTargetTracking ? 1.5 : 1.0;
         ctx.stroke();
         ctx.restore();
       });
@@ -3391,8 +3460,8 @@ export default function AthleteMindPage() {
             setGameStage("CALIBRATION_SHIELD");
             gameStageRef.current = "CALIBRATION_SHIELD";
             calibrationStanceFramesRef.current = 0;
-            const activeCfg = getExerciseConfig(exerciseRef.current);
-            speakCoachCue(`Full body framed. Test ${activeCfg.name} shield: ${activeCfg.actionPrompt} and hold.`);
+            const activeCfg = EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"];
+            speakCoachCue(`Full body framed. Test ${activeCfg.name} shield: ${activeCfg.prompts.initial} and hold.`);
             if (socketRef.current?.readyState === WebSocket.OPEN) {
               socketRef.current.send(JSON.stringify({ action: "set_stage", stage: "CALIBRATION_SHIELD" }));
             }
@@ -3401,14 +3470,22 @@ export default function AthleteMindPage() {
           calibrationStanceFramesRef.current = 0;
         }
       } else if (gameStageRef.current === "CALIBRATION_SHIELD") {
-        const activeCfg = getExerciseConfig(exerciseRef.current);
-        const metricRes = landmarks ? activeCfg.calculateMetrics(landmarks) : null;
-        const isPostureReady = metricRes
-          ? metricRes.isDepthReached || metricRes.isHolding
-          : primaryAngleRef.current <= (activeCfg.targetAngle ?? 100) + 10;
-        if (isPostureReady) {
+        const currentExerciseConfig = EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"];
+        const calibRes = landmarks && currentExerciseConfig.testCalibration
+          ? currentExerciseConfig.testCalibration(landmarks)
+          : (() => {
+              const m = landmarks ? currentExerciseConfig.calculateMetrics(landmarks) : null;
+              return {
+                isReady: m ? (m.isTargetReached || m.isHolding) : false,
+                message: currentExerciseConfig.prompts.hold,
+                targetHoldSec: currentExerciseConfig.targetRegion === "UPPER_BODY" ? 1.0 : 1.5,
+              };
+            })();
+
+        const targetHoldSec = calibRes.targetHoldSec || (currentExerciseConfig.targetRegion === "UPPER_BODY" ? 1.0 : 1.5);
+        if (calibRes.isReady) {
           calibrationShieldHoldSecRef.current += 0.025;
-          const progress = Math.min(1.0, calibrationShieldHoldSecRef.current / 1.5);
+          const progress = Math.min(1.0, calibrationShieldHoldSecRef.current / targetHoldSec);
           setShieldTestHoldProgress(progress);
 
           // Force draw charging gold hexagonal shield
@@ -3437,7 +3514,7 @@ export default function AthleteMindPage() {
           ctx.fillText(`⬡ SHIELD CHARGING: ${Math.round(progress * 100)}%`, pComX, pComY - hexRadius - 12);
           ctx.restore();
 
-          if (calibrationShieldHoldSecRef.current >= 1.5) {
+          if (calibrationShieldHoldSecRef.current >= targetHoldSec) {
             synth.playShieldOptimalChime();
             spawnParticles(pComX, pComY, 50, "#ffd700");
             spawnFloatingText("SHIELD SYSTEMS OPTIMAL!", pComX, pComY - 45, "#ffd700", 36);
@@ -3455,7 +3532,7 @@ export default function AthleteMindPage() {
           }
         } else {
           calibrationShieldHoldSecRef.current = Math.max(0, calibrationShieldHoldSecRef.current - 0.05);
-          setShieldTestHoldProgress(Math.min(1.0, calibrationShieldHoldSecRef.current / 1.5));
+          setShieldTestHoldProgress(Math.min(1.0, calibrationShieldHoldSecRef.current / targetHoldSec));
         }
       }
     }
@@ -3502,11 +3579,11 @@ export default function AthleteMindPage() {
         const dist = Math.hypot(curX - comX, curY - comY);
 
         if (dist <= perimeterRadius || p.progress >= 0.90) {
-          const activeCfg = getExerciseConfig(exerciseRef.current);
+          const activeCfg = EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"];
           const metricRes = landmarks ? activeCfg.calculateMetrics(landmarks) : null;
           const isAtDepth = metricRes
-            ? (metricRes.isDepthReached || metricRes.isHolding)
-            : (primaryAngleRef.current <= (activeCfg.targetAngle ?? 100) + 5 || holdProgressRef.current >= 0.8);
+            ? (metricRes.isTargetReached || metricRes.isHolding)
+            : (holdProgressRef.current >= 0.8);
           const noFault = metricRes
             ? !metricRes.faultDetected
             : faultJointIndicesRef.current.length === 0;
@@ -3706,6 +3783,11 @@ export default function AthleteMindPage() {
     }
   }, [spawnFloatingText, spawnParticles]);
 
+  const renderCanvasPassRef = useRef(renderCanvasPass);
+  useEffect(() => {
+    renderCanvasPassRef.current = renderCanvasPass;
+  });
+
   // ---------------------------------------------------------------------------
   // Continuous MediaPipe Pose Loop & WebSocket Connection (Bilateral 3D Stream)
   // ---------------------------------------------------------------------------
@@ -3734,48 +3816,54 @@ export default function AthleteMindPage() {
       if (results.poseLandmarks) {
         landmarksRef.current = results.poseLandmarks;
 
-        // Dynamic 10-Exercise Clinical Evaluation
-        const activeCfg = getExerciseConfig(exerciseRef.current);
-        const metricRes = activeCfg.calculateMetrics(results.poseLandmarks);
+        // Dynamic 10-Exercise Clinical Evaluation Dispatch
+        const currentExerciseConfig = EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"];
+        const metrics = currentExerciseConfig.calculateMetrics(results.poseLandmarks);
 
-        if (metricRes.primaryAngle !== undefined) {
-          setPrimaryAngle(Math.round(metricRes.primaryAngle));
-          primaryAngleRef.current = metricRes.primaryAngle;
+        // Update HUD variables dynamically based strictly on active exercise:
+        setCurrentDisplayAngle(metrics.primaryAngle);
+        setIsHolding(metrics.isHolding);
+        setIsDepthTargetMet(metrics.isTargetReached);
+        setHasFault(metrics.faultDetected);
+        setFaultFeedback(metrics.faultMessage || "");
+
+        if (metrics.primaryAngle !== undefined) {
+          setPrimaryAngle(Math.round(metrics.primaryAngle));
+          primaryAngleRef.current = metrics.primaryAngle;
         }
-        if (metricRes.secondaryAngle !== undefined) {
-          setSecondaryAngle(Math.round(metricRes.secondaryAngle));
+        if (metrics.secondaryAngle !== undefined) {
+          setSecondaryAngle(Math.round(metrics.secondaryAngle));
         }
-        if (metricRes.activeJointIndices?.[0] !== undefined) {
-          setActiveJointIdx(metricRes.activeJointIndices[0]);
-          activeJointIdxRef.current = metricRes.activeJointIndices[0];
+        if (metrics.activeJointIndices?.[0] !== undefined) {
+          setActiveJointIdx(metrics.activeJointIndices[0]);
+          activeJointIdxRef.current = metrics.activeJointIndices[0];
         }
-        if (metricRes.faultJointIndices) {
-          setFaultJointIndices(metricRes.faultJointIndices);
-          faultJointIndicesRef.current = metricRes.faultJointIndices;
+        if (metrics.faultJointIndices) {
+          setFaultJointIndices(metrics.faultJointIndices);
+          faultJointIndicesRef.current = metrics.faultJointIndices;
         }
 
-        // Real-time Standalone/Offline Hold Progress and Banner Update
-        const isSocketActive = socketRef.current && socketRef.current.readyState === WebSocket.OPEN;
-        if (!isSocketActive && gameStageRef.current === "ACTIVE_DEFLECTION") {
-          if (metricRes.isHolding) {
-            const holdTarget = activeCfg.deflectionHoldTime || 1.5;
+        // Real-time Dynamic Hold Progress & Banner Update (Authoritative 60 FPS loop)
+        if (gameStageRef.current === "ACTIVE_DEFLECTION") {
+          if (metrics.isHolding) {
+            const holdTarget = currentExerciseConfig.deflectionHoldTime || 1.5;
             setHoldProgress((prev) => {
               const next = Math.min(1.0, prev + 0.033 / holdTarget);
               holdProgressRef.current = next;
               return next;
             });
-            setCombatBanner(activeCfg.holdPrompt);
+            setCombatBanner(currentExerciseConfig.prompts.hold);
             setCombatBannerType("HOLD");
-          } else if (metricRes.faultDetected) {
-            setCombatBanner(metricRes.faultMessage || activeCfg.faultPrompt);
+          } else if (metrics.faultDetected) {
+            setCombatBanner(metrics.faultMessage || currentExerciseConfig.prompts.fault || currentExerciseConfig.faultPrompt);
             setCombatBannerType("FAULT");
             holdProgressRef.current = 0;
             setHoldProgress(0);
-          } else if (metricRes.isDepthReached) {
-            setCombatBanner(activeCfg.completePrompt);
+          } else if (metrics.isTargetReached) {
+            setCombatBanner(currentExerciseConfig.prompts.complete);
             setCombatBannerType("CRIT");
           } else {
-            setCombatBanner(activeCfg.actionPrompt);
+            setCombatBanner(currentExerciseConfig.prompts.initial);
             setCombatBannerType("WAITING");
             holdProgressRef.current = Math.max(0, holdProgressRef.current - 0.04);
             setHoldProgress(holdProgressRef.current);
@@ -3851,6 +3939,11 @@ export default function AthleteMindPage() {
       try {
         const data: BioEnginePacket = JSON.parse(event.data);
 
+        // Ignore packets if exercise changed and backend is sending stale exercise data
+        if (data.exercise_type && data.exercise_type !== activeExerciseRef.current && data.exercise_type !== exerciseRef.current) {
+          return;
+        }
+
         // Update Orientation & Active Evaluation Profile
         if (data.view_orientation) {
           setOrientationView(data.view_orientation);
@@ -3876,11 +3969,13 @@ export default function AthleteMindPage() {
           faultJointIndicesRef.current = data.fault_joint_indices;
         }
 
-        // Update Kinematics
-        const currentPriAngle = data.primary_angle !== undefined ? data.primary_angle : data.knee_angle;
+        // Update Kinematics strictly respecting active exercise
+        const isSquatProtocol = activeExerciseRef.current === "squats" || activeExerciseRef.current === "squat";
+        const currentPriAngle = data.primary_angle !== undefined ? data.primary_angle : (isSquatProtocol ? data.knee_angle : undefined);
         if (currentPriAngle !== undefined) {
           setPrimaryAngle(Math.round(currentPriAngle));
           primaryAngleRef.current = currentPriAngle;
+          setCurrentDisplayAngle(currentPriAngle);
 
           if (currentPriAngle < minSessionAngle) {
             setMinSessionAngle(Math.round(currentPriAngle));
@@ -4231,7 +4326,7 @@ export default function AthleteMindPage() {
         const loop = async () => {
           if (!isRunning) return;
 
-          renderCanvasPass();
+          renderCanvasPassRef.current();
 
           if (
             videoRef.current &&
@@ -4498,7 +4593,7 @@ export default function AthleteMindPage() {
                   ? "MISSION COMPLETED // PURITY RESTORED"
                   : incomingAttack
                   ? "⚠️ INCOMING BOSS STRIKE — PARRY!"
-                  : combatBanner || "HOLD SQUAT DEPTH"}
+                  : combatBanner || (EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"]).prompts.initial}
               </span>
             </div>
           </div>
@@ -4697,7 +4792,7 @@ export default function AthleteMindPage() {
                   INCOMING BOSS STRIKE
                 </div>
                 <div className="text-xs sm:text-sm font-bold text-amber-300 text-center tracking-wider mb-3">
-                  {holdProgress > 0 ? "SHIELD ENGAGED • MAINTAIN DEPTH TO DEFLECT!" : "PARRY BY SQUATTING & HOLDING DEPTH!"}
+                  {holdProgress > 0 ? "SHIELD ENGAGED • MAINTAIN POSTURE TO DEFLECT!" : `PARRY BY ENGAGING ${(EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"]).prompts.initial} NOW!`}
                 </div>
 
                 {/* Parry Timer Countdown Bar */}
@@ -4848,37 +4943,41 @@ export default function AthleteMindPage() {
             </div>
           )}
 
-          {/* 4. CALIBRATION_SHIELD: Squat Shield Activation Test */}
-          {gameStage === "CALIBRATION_SHIELD" && (
-            <div className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-between p-6">
-              {/* Dedicated Diagnostic Banner */}
-              <div className="w-full max-w-2xl px-8 py-4 rounded-3xl bg-emerald-950/90 border-2 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.5)] backdrop-blur-md text-center">
-                <div className="text-xs font-mono uppercase tracking-widest text-emerald-400 font-bold mb-1">
-                  CALIBRATION PHASE 3/3 • SHIELD ACTIVATION
+          {/* 4. CALIBRATION_SHIELD: Movement Shield Activation Test */}
+          {gameStage === "CALIBRATION_SHIELD" && (() => {
+            const currentExerciseConfig = EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"];
+            const targetSec = currentExerciseConfig.targetRegion === "UPPER_BODY" ? "1.0s" : "1.5s";
+            return (
+              <div className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-between p-6">
+                {/* Dedicated Diagnostic Banner */}
+                <div className="w-full max-w-2xl px-8 py-4 rounded-3xl bg-emerald-950/90 border-2 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.5)] backdrop-blur-md text-center">
+                  <div className="text-xs font-mono uppercase tracking-widest text-emerald-400 font-bold mb-1">
+                    CALIBRATION PHASE 3/3 • {currentExerciseConfig.name.toUpperCase()} SHIELD ACTIVATION
+                  </div>
+                  <div className="text-lg sm:text-2xl font-black font-mono uppercase tracking-wider text-emerald-300 drop-shadow-[0_0_20px_rgba(16,185,129,0.8)]">
+                    {currentExerciseConfig.prompts.initial}: HOLD FOR {targetSec} TO PRIME SHIELD
+                  </div>
                 </div>
-                <div className="text-lg sm:text-2xl font-black font-mono uppercase tracking-wider text-emerald-300 drop-shadow-[0_0_20px_rgba(16,185,129,0.8)]">
-                  TEST SQUAT: HOLD DEPTH FOR 1.5s TO PRIME SHIELD
-                </div>
-              </div>
 
-              {/* Shield Hold Meter */}
-              <div className="w-full max-w-md p-4 rounded-2xl bg-black/85 border border-emerald-500/50 backdrop-blur-md flex flex-col items-center">
-                <div className="flex justify-between w-full text-xs font-mono font-bold text-emerald-300 mb-1.5">
-                  <span>⬡ SHIELD MATRIX CHARGE</span>
-                  <span>{Math.round(shieldTestHoldProgress * 100)}%</span>
-                </div>
-                <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-emerald-500/30 p-0.5 mb-2">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300 transition-all duration-75 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
-                    style={{ width: `${Math.max(0, Math.min(100, shieldTestHoldProgress * 100))}%` }}
-                  />
-                </div>
-                <div className="text-[11px] font-mono text-slate-300">
-                  {shieldTestHoldProgress >= 1.0 ? "⚡ SHIELD SYSTEMS OPTIMAL!" : "LOWER HIPS & MAINTAIN DEPTH (1.5S)"}
+                {/* Shield Hold Meter */}
+                <div className="w-full max-w-md p-4 rounded-2xl bg-black/85 border border-emerald-500/50 backdrop-blur-md flex flex-col items-center">
+                  <div className="flex justify-between w-full text-xs font-mono font-bold text-emerald-300 mb-1.5">
+                    <span>⬡ SHIELD MATRIX CHARGE</span>
+                    <span>{Math.round(shieldTestHoldProgress * 100)}%</span>
+                  </div>
+                  <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-emerald-500/30 p-0.5 mb-2">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300 transition-all duration-75 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
+                      style={{ width: `${Math.max(0, Math.min(100, shieldTestHoldProgress * 100))}%` }}
+                    />
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-300">
+                    {shieldTestHoldProgress >= 1.0 ? "⚡ SHIELD SYSTEMS OPTIMAL!" : `${currentExerciseConfig.prompts.initial} & HOLD (${targetSec})`}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* 5. BOSS_INTRO: 3-Second Red Strobe Klaxon Alert */}
           {gameStage === "BOSS_INTRO" && activeDialogueId === null && (
@@ -5093,25 +5192,29 @@ export default function AthleteMindPage() {
 
           {/* Giant Dynamic Center Action Banner (Strict State-Gated: ACTIVE_DEFLECTION Only) */}
           {gameStage === "ACTIVE_DEFLECTION" && (() => {
-            const activeCfg = getExerciseConfig(exercise);
+            const currentExerciseConfig = EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"];
             const bannerState = getGiantBannerState();
-            let customMsg: string | undefined;
-            if (bannerState === "SQUAT_DOWN") {
-              customMsg = activeCfg.actionPrompt;
-            } else if (bannerState === "HOLD_POSITION") {
-              customMsg = activeCfg.holdPrompt;
-            } else if (bannerState === "STAND_UP") {
-              customMsg = activeCfg.completePrompt;
-            } else if (bannerState === "EGO_LIFT") {
-              customMsg = combatBanner || activeCfg.faultPrompt;
-            }
+
+            // Dynamic HUD Prompts strictly from active exercise definition:
+            const promptText = !isDepthTargetMet
+              ? currentExerciseConfig.prompts.initial
+              : isHolding
+              ? currentExerciseConfig.prompts.hold
+              : currentExerciseConfig.prompts.complete;
+
+            const customMsg = hasFault
+              ? (faultFeedback || currentExerciseConfig.prompts.fault || currentExerciseConfig.faultPrompt)
+              : incomingAttack
+              ? "⚠️ INCOMING BOSS STRIKE!"
+              : promptText;
 
             return (
               <GiantActionBanner
                 state={bannerState}
                 holdProgress={holdProgress}
-                targetHoldDuration={targetHoldDuration}
+                targetHoldDuration={currentExerciseConfig.deflectionHoldTime || targetHoldDuration}
                 customMessage={customMsg}
+                subMessage={currentExerciseConfig.instructions}
               />
             );
           })()}

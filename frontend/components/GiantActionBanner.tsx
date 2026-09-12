@@ -3,6 +3,7 @@
 import React from "react";
 
 export type BannerState =
+  | "ACTION_START"
   | "SQUAT_DOWN"
   | "HOLD_POSITION"
   | "STAND_UP"
@@ -24,17 +25,18 @@ export const GiantActionBanner: React.FC<GiantActionBannerProps> = ({
   customMessage,
   subMessage,
 }) => {
-  let title = "SQUAT DOWN";
-  let subtitle = "INITIATE CONTROLLED ECCENTRIC DESCENT";
+  let title = "INITIATE MOVEMENT";
+  let subtitle = "BEGIN CONTROLLED MOVEMENT";
   let textClass =
     "text-cyan-300 animate-pulse drop-shadow-[0_0_35px_rgba(6,182,212,0.9)]";
   let containerBg = "";
   let showProgressBar = false;
 
   switch (state) {
+    case "ACTION_START":
     case "SQUAT_DOWN":
-      title = customMessage || "SQUAT DOWN";
-      subtitle = subMessage || "LOWER HIPS STEADILY TOWARD 90° DEPTH";
+      title = customMessage || "INITIATE MOVEMENT";
+      subtitle = subMessage || "BEGIN CONTROLLED ECCENTRIC PHASE";
       textClass =
         "text-cyan-300 animate-pulse drop-shadow-[0_0_35px_rgba(6,182,212,0.9)]";
       break;
@@ -43,23 +45,23 @@ export const GiantActionBanner: React.FC<GiantActionBannerProps> = ({
       title =
         customMessage ||
         `HOLD POSITION (${targetHoldDuration.toFixed(1)}s)`;
-      subtitle = subMessage || "MAINTAIN DEPTH // ENGAGE KINETIC SHIELD";
+      subtitle = subMessage || "MAINTAIN POSTURE // ENGAGE KINETIC SHIELD";
       textClass =
         "text-amber-400 scale-105 transition-transform drop-shadow-[0_0_40px_rgba(245,158,11,0.95)]";
       showProgressBar = true;
       break;
 
     case "STAND_UP":
-      title = customMessage || "STAND UP // DEFLECT!";
-      subtitle = subMessage || "DRIVE UP THROUGH HEELS • ATTACK PARRIED!";
+      title = customMessage || "REP COMPLETE // DEFLECT!";
+      subtitle = subMessage || "RETURN TO START • ATTACK PARRIED!";
       textClass =
         "text-emerald-400 drop-shadow-[0_0_40px_rgba(16,185,129,0.95)] animate-pulse";
       break;
 
     case "EGO_LIFT":
-      title = customMessage || "EGO LIFT / KNEE CAVE DETECTED";
+      title = customMessage || "FORM FAULT DETECTED";
       subtitle =
-        subMessage || "VALGUS COLLAPSE WARNING • DRIVE KNEES OUTWARD & SLOW DOWN";
+        subMessage || "ALIGNMENT WARNING • STABILIZE JOINTS & SLOW DOWN";
       textClass =
         "text-red-500 font-black drop-shadow-[0_0_40px_rgba(239,68,68,0.95)]";
       containerBg =
@@ -68,7 +70,7 @@ export const GiantActionBanner: React.FC<GiantActionBannerProps> = ({
 
     case "PARRY_ATTACK":
       title = customMessage || "⚠️ INCOMING BOSS STRIKE!";
-      subtitle = subMessage || "PARRY BY SQUATTING & HOLDING DEPTH NOW!";
+      subtitle = subMessage || "PARRY BY HOLDING DEFLECTION POSTURE NOW!";
       textClass =
         "text-rose-400 animate-pulse drop-shadow-[0_0_40px_rgba(244,63,94,0.95)]";
       containerBg =
