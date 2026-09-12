@@ -3824,19 +3824,18 @@ export default function AthleteMindPage() {
           setRepCount(data.rep_count);
 
           // Circuit Mode Automatic Gauntlet Progression (Squats -> Overhead Press)
-            if (
-              activeCircuitModeRef.current === "FULL_BODY" &&
-              circuitStepRef.current === 1 &&
-              data.rep_count >= 5
-            ) {
-              circuitStepRef.current = 2;
-              setCircuitStep(2);
-              setExercise("overhead_press");
-              exerciseRef.current = "overhead_press";
-              speakCoachCue("Squats gauntlet cleared! Transitioning to Stage 2: Overhead Press. Deflect incoming vertical attacks!");
-              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                socketRef.current.send(JSON.stringify({ action: "set_exercise", exercise: "overhead_press" }));
-              }
+          if (
+            activeCircuitModeRef.current === "FULL_BODY" &&
+            circuitStepRef.current === 1 &&
+            data.rep_count >= 5
+          ) {
+            circuitStepRef.current = 2;
+            setCircuitStep(2);
+            setExercise("overhead_press");
+            exerciseRef.current = "overhead_press";
+            speakCoachCue("Squats gauntlet cleared! Transitioning to Stage 2: Overhead Press. Deflect incoming vertical attacks!");
+            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({ action: "set_exercise", exercise: "overhead_press" }));
             }
           }
         }
