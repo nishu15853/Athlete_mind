@@ -47,6 +47,21 @@ interface BioEnginePacket {
   is_critical?: boolean;
   active_joint_index?: number;
   fault_joint_indices?: number[];
+  boss_hp?: number;
+  boss_max_hp?: number;
+  player_hp?: number;
+  player_max_hp?: number;
+  boss_state?: "STANDARD" | "ENRAGED" | "DEFEATED";
+  boss_attack_timer?: number;
+  incoming_attack?: boolean;
+  parry_window_sec?: number;
+  parry_success?: boolean;
+  parry_failed?: boolean;
+  combo_streak?: number;
+  combo_multiplier?: number;
+  streak_collapsed?: boolean;
+  combat_damage_dealt?: number;
+  combat_damage_taken?: number;
 }
 
 interface AngleSample {
@@ -263,6 +278,102 @@ class AudioSynth {
       // safe
     }
   }
+
+  playParrySuccess() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      // Metallic clash primary
+      const osc1 = this.ctx.createOscillator();
+      const gain1 = this.ctx.createGain();
+      osc1.type = "triangle";
+      osc1.frequency.setValueAtTime(1200, now);
+      osc1.frequency.exponentialRampToValueAtTime(750, now + 0.3);
+      gain1.gain.setValueAtTime(0.4, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc1.connect(gain1);
+      gain1.connect(this.ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.35);
+
+      // High metallic sheen
+      const osc2 = this.ctx.createOscillator();
+      const gain2 = this.ctx.createGain();
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(2400, now);
+      osc2.frequency.exponentialRampToValueAtTime(1600, now + 0.25);
+      gain2.gain.setValueAtTime(0.25, now);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc2.connect(gain2);
+      gain2.connect(this.ctx.destination);
+      osc2.start(now);
+      osc2.stop(now + 0.25);
+    } catch {
+      // safe
+    }
+  }
+
+  playStreakBreak() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(320, now);
+      osc.frequency.exponentialRampToValueAtTime(50, now + 0.35);
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.35);
+
+      // Dissonant sub-tone
+      const sub = this.ctx.createOscillator();
+      const subGain = this.ctx.createGain();
+      sub.type = "square";
+      sub.frequency.setValueAtTime(145, now);
+      sub.frequency.exponentialRampToValueAtTime(40, now + 0.25);
+      subGain.gain.setValueAtTime(0.2, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      sub.connect(subGain);
+      subGain.connect(this.ctx.destination);
+      sub.start(now);
+      sub.stop(now + 0.25);
+    } catch {
+      // safe
+    }
+  }
+
+  playStreakLevelUp(multiplier: number) {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const base = multiplier >= 3.0 ? 600 : multiplier >= 2.0 ? 500 : 400;
+      const freqs = [base, base * 1.25, base * 1.5, base * 2.0];
+      freqs.forEach((freq, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        const start = this.ctx!.currentTime + idx * 0.07;
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.18, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.22);
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(start);
+        osc.stop(start + 0.22);
+      });
+    } catch {
+      // safe
+    }
+  }
 }
 
 const synth = new AudioSynth();
@@ -298,7 +409,15 @@ export default function AthleteMindPage() {
   const [stunTimer, setStunTimer] = useState(0);
   const [isStunned, setIsStunned] = useState(false);
 
-  const isEnraged = bossHp > 0 && bossHp <= 250;
+  // Phase 6: Arcade Combat & Mechanics
+  const [bossState, setBossState] = useState<"STANDARD" | "ENRAGED" | "DEFEATED">("STANDARD");
+  const [comboStreak, setComboStreak] = useState(0);
+  const [comboMultiplier, setComboMultiplier] = useState(1.0);
+  const [incomingAttack, setIncomingAttack] = useState(false);
+  const [parryWindowSec, setParryWindowSec] = useState(0.0);
+  const [screenGlitch, setScreenGlitch] = useState(false);
+
+  const isEnraged = bossState === "ENRAGED" || (bossHp > 0 && bossHp <= 250);
 
   // Kinematics & Metrics
   const [repCount, setRepCount] = useState(0);
@@ -502,6 +621,14 @@ export default function AthleteMindPage() {
     particlesRef.current = [];
     floatingTextsRef.current = [];
 
+    // Reset Phase 6 Arcade Combat State
+    setBossState("STANDARD");
+    setComboStreak(0);
+    setComboMultiplier(1.0);
+    setIncomingAttack(false);
+    setParryWindowSec(0.0);
+    setScreenGlitch(false);
+
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ action: "reset" }));
     }
@@ -582,7 +709,9 @@ export default function AthleteMindPage() {
         return 0;
       });
 
-      if (holdProgressRef.current === 0) {
+      // If WebSocket is not connected, use client-side attack timer fallback
+      const isSocketActive = socketRef.current && socketRef.current.readyState === WebSocket.OPEN;
+      if (!isSocketActive && holdProgressRef.current === 0) {
         setBossAttackTimer((prevTimer) => {
           if (prevTimer <= 0.1) {
             synth.playBossAttack();
@@ -605,7 +734,7 @@ export default function AthleteMindPage() {
               spawnFloatingText("-20 BOSS STRIKE!", canvas.width / 2, canvas.height / 2, "#ff0055", 34);
             }
 
-            return 10.0;
+            return isEnragedRef.current ? 6.0 : 10.0;
           }
           return Math.max(0, Number((prevTimer - 0.1).toFixed(1)));
         });
@@ -1052,6 +1181,72 @@ export default function AthleteMindPage() {
           setFormPurity(Math.round(data.purity));
         }
 
+        // Phase 6 Boss Combat Synchronization
+        if (data.boss_hp !== undefined) {
+          setBossHp(data.boss_hp);
+        }
+        if (data.player_hp !== undefined) {
+          setPlayerHp(data.player_hp);
+        }
+        if (data.boss_state) {
+          setBossState(data.boss_state);
+        }
+        if (data.boss_attack_timer !== undefined) {
+          setBossAttackTimer(data.boss_attack_timer);
+        }
+        if (data.incoming_attack !== undefined) {
+          setIncomingAttack(data.incoming_attack);
+        }
+        if (data.parry_window_sec !== undefined) {
+          setParryWindowSec(data.parry_window_sec);
+        }
+        if (data.combo_streak !== undefined) {
+          setComboStreak(data.combo_streak);
+        }
+        if (data.combo_multiplier !== undefined) {
+          setComboMultiplier(data.combo_multiplier);
+        }
+
+        // Handle Parry Deflection (Counter Attack)
+        if (data.parry_success) {
+          synth.playParrySuccess();
+          screenShakeRef.current = 14;
+          setCombatBanner("PARRY DEFLECTED! (+50 COUNTER DMG)");
+          setCombatBannerType("CRIT");
+          const canvas = canvasRef.current;
+          if (canvas) {
+            spawnParticles(canvas.width / 2, canvas.height * 0.45, 45, "#00f0ff");
+            spawnFloatingText("🛡️ PARRY DEFLECT! -50", canvas.width / 2, canvas.height * 0.35, "#00f0ff", 36);
+          }
+        }
+
+        // Handle Parry Failure (Heavy Direct Hit)
+        if (data.parry_failed) {
+          synth.playStun();
+          synth.playBossAttack();
+          screenShakeRef.current = 30;
+          setScreenGlitch(true);
+          setTimeout(() => setScreenGlitch(false), 500);
+          setCombatBanner("PARRY FAILED - DIRECT HIT TAKEN (-35 HP)!");
+          setCombatBannerType("EGO_LIFT");
+          const canvas = canvasRef.current;
+          if (canvas) {
+            spawnParticles(canvas.width / 2, canvas.height * 0.5, 40, "#ff0055");
+            spawnFloatingText("-35 HP BOSS CRUSH!", canvas.width / 2, canvas.height * 0.5, "#ff0055", 36);
+          }
+        }
+
+        // Handle Streak Collapse
+        if (data.streak_collapsed) {
+          synth.playStreakBreak();
+          setCombatBanner("FORM FAULT - COMBO STREAK COLLAPSED!");
+          setCombatBannerType("FAULT");
+          const canvas = canvasRef.current;
+          if (canvas) {
+            spawnFloatingText("STREAK BROKEN (1.0x)", canvas.width / 2, canvas.height * 0.6, "#ff4444", 30);
+          }
+        }
+
         // Audio Biomechanical Coach Cue
         if (data.audio_cue) {
           speakCoachCue(data.audio_cue);
@@ -1063,8 +1258,6 @@ export default function AthleteMindPage() {
           holdProgressRef.current = data.hold_progress;
 
           if (data.hold_progress > 0) {
-            setBossAttackTimer(10.0);
-
             if (Date.now() - lastHoldTickTimeRef.current >= 280) {
               synth.playHoldTick(data.hold_progress);
               lastHoldTickTimeRef.current = Date.now();
@@ -1073,7 +1266,7 @@ export default function AthleteMindPage() {
         }
 
         // Handle Stun & Fault Events
-        if (data.status === "penalty" || data.phase === "STUNNED" || (data.damage_taken && data.damage_taken > 0)) {
+        if (data.status === "penalty" || data.phase === "STUNNED" || (data.damage_taken && data.damage_taken > 0 && !data.parry_failed)) {
           setIsStunned(true);
           isStunnedRef.current = true;
           setOverheatMeter(100);
@@ -1097,20 +1290,30 @@ export default function AthleteMindPage() {
           setCombatBanner(data.message || "CRITICAL HIT!");
           setCombatBannerType("CRIT");
 
-          if (data.damage && data.damage > 0) {
+          const dmg = data.damage || 100;
+          if (dmg > 0 && !data.parry_success) {
             synth.playCritHit();
             screenShakeRef.current = 16;
-            setBossHp((prev) => Math.max(0, prev - data.damage!));
-            setBossAttackTimer(10.0);
+            setBossHp((prev) => Math.max(0, prev - dmg));
 
+            const mult = data.combo_multiplier || 1.0;
             const canvas = canvasRef.current;
             if (canvas) {
-              spawnParticles(canvas.width / 2, canvas.height * 0.6, 30, "#ffd700");
-              spawnFloatingText(`-100 CRIT!`, canvas.width / 2, canvas.height * 0.4, "#ffd700", 36);
+              spawnParticles(canvas.width / 2, canvas.height * 0.6, 30, mult >= 3.0 ? "#ff0055" : "#ffd700");
+              spawnFloatingText(
+                mult > 1.0 ? `-${dmg} (x${mult.toFixed(1)})` : `-${dmg} CRIT!`,
+                canvas.width / 2,
+                canvas.height * 0.4,
+                mult >= 3.0 ? "#ff2a5f" : "#ffd700",
+                mult >= 3.0 ? 40 : 36
+              );
             }
           }
 
           if (data.event === "REP_COMPLETE") {
+            if (data.combo_multiplier && data.combo_multiplier > 1.0) {
+              synth.playStreakLevelUp(data.combo_multiplier);
+            }
             const holdDur = Math.max(1.0, data.hold_time || 1.5);
             setHoldDurations((prev) => [...prev, holdDur]);
             setRepDetails((prev) => [
@@ -1303,8 +1506,8 @@ export default function AthleteMindPage() {
         </div>
 
         {/* Center: Live Telemetry */}
-        <div className="flex items-center gap-3.5">
-          <div className="text-center px-3.5 py-1 rounded-xl bg-black/60 border border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
+        <div className="flex items-center gap-3">
+          <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
             <div className="text-[9px] text-cyan-400 font-semibold tracking-widest uppercase">Reps</div>
             <div className="text-2xl font-black text-cyan-300 font-mono tracking-tight">
               {repCount.toString().padStart(2, "0")}
@@ -1318,6 +1521,33 @@ export default function AthleteMindPage() {
             </div>
           </div>
 
+          {/* Kinetic Combo Multiplier Badge */}
+          <div
+            className={`text-center px-3 py-1 rounded-xl border transition-all duration-300 ${
+              comboMultiplier >= 3.0
+                ? "bg-gradient-to-b from-rose-950/90 to-amber-950/90 border-amber-400 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.8)] animate-pulse"
+                : comboMultiplier >= 2.0
+                ? "bg-purple-950/80 border-fuchsia-400 text-fuchsia-300 shadow-[0_0_15px_rgba(217,70,239,0.5)]"
+                : comboMultiplier >= 1.5
+                ? "bg-amber-950/80 border-amber-500 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
+                : "bg-black/60 border-slate-700/50 text-slate-400"
+            }`}
+          >
+            <div className="text-[9px] uppercase font-semibold tracking-widest flex items-center justify-center gap-1">
+              <span>Streak</span>
+              <span className="text-white font-mono font-bold">[{comboStreak}]</span>
+            </div>
+            <div className="text-sm font-black font-mono tracking-wider">
+              {comboMultiplier >= 3.0
+                ? "x3.0 HYPER"
+                : comboMultiplier >= 2.0
+                ? "x2.0 SURGE"
+                : comboMultiplier >= 1.5
+                ? "x1.5 COMBAT"
+                : "x1.0 BASE"}
+            </div>
+          </div>
+
           <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-slate-700/50">
             <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">
               {primaryAngleName} / {secondaryAngleName}
@@ -1327,10 +1557,28 @@ export default function AthleteMindPage() {
             </div>
           </div>
 
-          <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-rose-500/40">
-            <div className="text-[9px] text-rose-400 font-semibold tracking-widest uppercase">Boss Attack</div>
-            <div className={`text-base font-black font-mono tracking-tight ${bossAttackTimer <= 3.0 ? "text-rose-400 animate-ping" : "text-amber-300"}`}>
-              {bossAttackTimer.toFixed(1)}s
+          <div
+            className={`text-center px-3 py-1 rounded-xl bg-black/60 border ${
+              incomingAttack
+                ? "border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)] animate-pulse"
+                : isEnraged
+                ? "border-rose-500/60"
+                : "border-rose-500/40"
+            }`}
+          >
+            <div className="text-[9px] text-rose-400 font-semibold tracking-widest uppercase">
+              {incomingAttack ? "PARRY ALERT" : isEnraged ? "Enraged Cycle" : "Boss Strike"}
+            </div>
+            <div
+              className={`text-base font-black font-mono tracking-tight ${
+                incomingAttack
+                  ? "text-rose-400 animate-bounce"
+                  : bossAttackTimer <= 3.0
+                  ? "text-rose-400 animate-ping"
+                  : "text-amber-300"
+              }`}
+            >
+              {incomingAttack ? `PARRY: ${parryWindowSec.toFixed(1)}s` : `${bossAttackTimer.toFixed(1)}s`}
             </div>
           </div>
         </div>
@@ -1339,12 +1587,23 @@ export default function AthleteMindPage() {
         <div className="flex items-center gap-3.5 w-80 justify-end">
           <div className="flex-1 text-right">
             <div className="flex justify-between text-xs font-bold tracking-wider mb-1">
-              <span className={isEnraged ? "text-rose-500 animate-pulse font-black" : "text-violet-400"}>
-                {isEnraged ? "🔥 CYBER-COLOSSUS [ENRAGED]" : "CYBER-COLOSSUS"}
+              <span className={isEnraged ? "text-rose-500 animate-pulse font-black flex items-center justify-end gap-1" : "text-violet-400"}>
+                {isEnraged ? (
+                  <>
+                    <span className="text-amber-400">🔥</span>
+                    <span>CYBER-COLOSSUS [OVERCLOCKED]</span>
+                  </>
+                ) : (
+                  "CYBER-COLOSSUS"
+                )}
               </span>
-              <span className="text-rose-300">{bossHp} / 500</span>
+              <span className="text-rose-300 font-mono">{bossHp} / 500</span>
             </div>
-            <div className="h-2.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-rose-500/40 mb-1">
+            <div
+              className={`h-2.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border mb-1 ${
+                isEnraged ? "border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.7)]" : "border-rose-500/40"
+              }`}
+            >
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   isEnraged
@@ -1365,6 +1624,15 @@ export default function AthleteMindPage() {
           </button>
         </div>
       </header>
+
+      {/* Dynamic Boss Enraged Alert Banner */}
+      {isEnraged && matchStatus === "ACTIVE" && (
+        <div className="relative z-20 w-full bg-gradient-to-r from-red-950/95 via-rose-900/95 to-red-950/95 border-b border-rose-500/60 py-1 px-4 text-center text-[11px] font-black uppercase tracking-widest text-rose-200 flex items-center justify-center gap-2 animate-pulse shadow-[0_0_20px_rgba(244,63,94,0.5)]">
+          <span className="text-amber-300 animate-ping">⚡</span>
+          <span>WARNING: SYSTEM OVERCLOCKED — BOSS ATTACK INTERVAL REDUCED TO 6.0s</span>
+          <span className="text-amber-300 animate-ping">⚡</span>
+        </div>
+      )}
 
       {/* ------------------------------------------------------------------- */}
       {/* 2. SECONDARY CONTROLS BAR: EXERCISE & DIFFICULTY SELECTORS          */}
@@ -1459,13 +1727,57 @@ export default function AthleteMindPage() {
       {/* 3. MAIN ARENA VIEWPORT                                              */}
       {/* ------------------------------------------------------------------- */}
       <main className="relative flex-1 w-full h-full flex items-center justify-center p-3 sm:p-4 bg-gradient-to-b from-[#050811] via-[#080d1a] to-[#04060d]">
-        <div className="relative w-full max-w-5xl aspect-[4/3] max-h-[78vh] rounded-3xl overflow-hidden border-2 border-cyan-500/30 shadow-[0_0_50px_rgba(0,240,255,0.12)] bg-black">
+        <div
+          className={`relative w-full max-w-5xl aspect-[4/3] max-h-[78vh] rounded-3xl overflow-hidden border-2 transition-all duration-500 bg-black ${
+            isEnraged
+              ? "border-rose-500/80 shadow-[0_0_60px_rgba(244,63,94,0.4)]"
+              : "border-cyan-500/30 shadow-[0_0_50px_rgba(0,240,255,0.12)]"
+          }`}
+        >
           <canvas
             ref={canvasRef}
             width={640}
             height={480}
             className="w-full h-full object-cover"
           />
+
+          {/* Red Glitch Direct Hit Damage Overlay */}
+          {screenGlitch && (
+            <div className="absolute inset-0 z-35 bg-rose-600/35 pointer-events-none mix-blend-screen animate-pulse backdrop-invert" />
+          )}
+
+          {/* Timed Evasion & Biomechanical Parry Reticle Overlay */}
+          {incomingAttack && matchStatus === "ACTIVE" && (
+            <div className="absolute inset-0 z-35 flex flex-col items-center justify-center pointer-events-none">
+              <div className="relative flex flex-col items-center p-6 rounded-3xl bg-black/85 border-2 border-rose-500 shadow-[0_0_50px_rgba(244,63,94,0.8)] backdrop-blur-md animate-pulse max-w-md w-full mx-4">
+                <div className="text-4xl mb-2 animate-bounce">
+                  {holdProgress > 0 ? "🛡️" : "⚠️"}
+                </div>
+                <div className="text-rose-400 font-black text-lg sm:text-xl tracking-widest uppercase text-center mb-1">
+                  INCOMING BOSS STRIKE
+                </div>
+                <div className="text-xs sm:text-sm font-bold text-amber-300 text-center tracking-wider mb-3">
+                  {holdProgress > 0 ? "SHIELD ENGAGED • MAINTAIN DEPTH TO DEFLECT!" : "PARRY BY SQUATTING & HOLDING DEPTH!"}
+                </div>
+
+                {/* Parry Timer Countdown Bar */}
+                <div className="w-56 h-3 bg-slate-900 rounded-full overflow-hidden border border-rose-400/60 p-0.5 mb-2">
+                  <div
+                    className={`h-full rounded-full transition-all duration-75 ${
+                      holdProgress > 0
+                        ? "bg-gradient-to-r from-emerald-400 to-cyan-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]"
+                        : "bg-gradient-to-r from-amber-400 to-rose-600 shadow-[0_0_12px_rgba(244,63,94,0.8)]"
+                    }`}
+                    style={{ width: `${Math.max(0, Math.min(100, (parryWindowSec / 3.0) * 100))}%` }}
+                  />
+                </div>
+
+                <div className="text-xs font-mono font-black text-rose-300">
+                  PARRY WINDOW: <span className="text-white text-sm">{parryWindowSec.toFixed(1)}s</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Center Feedback Banner */}
           <div className="absolute top-5 left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">

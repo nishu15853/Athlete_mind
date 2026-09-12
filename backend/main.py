@@ -1236,6 +1236,159 @@ def create_exercise_engine(exercise_type: str, difficulty: str = "standard", tel
 
 
 # ---------------------------------------------------------------------------
+# Phase 6: Arcade Combat Engine (Dynamic Boss Phases, Parrying, Combo Multipliers)
+# ---------------------------------------------------------------------------
+
+class BossCombatEngine:
+    """Arcade Boss Combat Engine:
+    - Boss HP (500 max), Player HP (100 max)
+    - Dynamic Boss Phase:
+        - Phase 1 (Standard): Boss HP > 250 (50%). Attacks every 10.0s if player idle.
+        - Phase 2 (Overclocked / Enraged): Boss HP <= 250 (50%). Attacks accelerate to 6.0s.
+          Emits boss_state: "ENRAGED".
+    - Timed Evasion & Biomechanical Parrying:
+        - When attack timer reaches 0, enters 3.0s telegraph window:
+          incoming_attack = True, parry_window_sec = 3.0.
+        - If player maintains verified hold depth (is_holding) within window:
+          parry_success = True.
+          Reflects 50 damage to Boss HP.
+          Resets attack cycle.
+        - If window expires without verified hold:
+          parry_failed = True.
+          Player receives -35 HP direct damage.
+          Resets attack cycle.
+    - Kinetic Combo Multiplier:
+        - Consecutive pure reps:
+          1 rep -> 1.0x (100 damage)
+          2 reps -> 1.5x (150 damage)
+          3 reps -> 2.0x (200 damage)
+          4+ reps -> 3.0x (300 damage "HYPER OVERDRIVE")
+        - Form fault gate:
+          Any form fault (valgus, ego-lift, shallow release, posture fault) immediately
+          resets streak to 0 (1.0x multiplier), triggering streak_collapsed = True.
+    """
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.boss_hp = 500
+        self.boss_max_hp = 500
+        self.player_hp = 100
+        self.player_max_hp = 100
+        self.boss_state = "STANDARD"
+        self.attack_timer = 10.0
+        self.last_update_time: Optional[float] = None
+        self.incoming_attack = False
+        self.parry_window_left = 0.0
+        self.combo_streak = 0
+        self.damage_multiplier = 1.0
+        self.streak_collapsed = False
+        self.last_rep_awarded_idx = 0
+        self.telegraph_announced = False
+
+    def update(self, now: float, is_holding: bool, rep_count: int, had_fault: bool, is_critical: bool) -> Dict[str, Any]:
+        dt = 0.1
+        if self.last_update_time is not None:
+            dt = max(0.01, min(0.5, now - self.last_update_time))
+        self.last_update_time = now
+
+        # Update Boss Phase
+        if self.boss_hp <= 250:
+            self.boss_state = "ENRAGED"
+        else:
+            self.boss_state = "STANDARD"
+
+        base_attack_interval = 6.0 if self.boss_state == "ENRAGED" else 10.0
+
+        parry_success = False
+        parry_failed = False
+        self.streak_collapsed = False
+        damage_dealt = 0
+        damage_taken = 0
+
+        # Form Fault Gate -> Collapse Streak immediately
+        if had_fault:
+            if self.combo_streak > 0:
+                self.streak_collapsed = True
+            self.combo_streak = 0
+            self.damage_multiplier = 1.0
+
+        # Rep Complete -> Calculate Kinetic Multiplier & Deduct Boss HP
+        if rep_count > self.last_rep_awarded_idx:
+            self.last_rep_awarded_idx = rep_count
+            if not had_fault:
+                self.combo_streak += 1
+            else:
+                self.combo_streak = 1
+
+            if self.combo_streak >= 4:
+                self.damage_multiplier = 3.0
+            elif self.combo_streak == 3:
+                self.damage_multiplier = 2.0
+            elif self.combo_streak == 2:
+                self.damage_multiplier = 1.5
+            else:
+                self.damage_multiplier = 1.0
+
+            damage_dealt = int(100 * self.damage_multiplier)
+            self.boss_hp = max(0, self.boss_hp - damage_dealt)
+            # Reset attack cycle on player hit
+            self.attack_timer = base_attack_interval
+            self.incoming_attack = False
+            self.parry_window_left = 0.0
+
+        # Timed Evasion & Parry Handling
+        if self.incoming_attack:
+            self.parry_window_left -= dt
+            if is_holding:
+                # Parry Deflected!
+                parry_success = True
+                self.incoming_attack = False
+                self.parry_window_left = 0.0
+                counter_damage = 50
+                self.boss_hp = max(0, self.boss_hp - counter_damage)
+                damage_dealt += counter_damage
+                self.attack_timer = base_attack_interval
+            elif self.parry_window_left <= 0:
+                # Parry Failed! Heavy hit to player
+                parry_failed = True
+                self.incoming_attack = False
+                self.parry_window_left = 0.0
+                attack_damage = 35
+                self.player_hp = max(0, self.player_hp - attack_damage)
+                damage_taken += attack_damage
+                self.attack_timer = base_attack_interval
+        else:
+            # Countdown boss attack when player is idle (not holding)
+            if not is_holding:
+                self.attack_timer = max(0.0, self.attack_timer - dt)
+                if self.attack_timer <= 0.0:
+                    self.incoming_attack = True
+                    self.parry_window_left = 3.0
+
+        if self.boss_hp <= 250:
+            self.boss_state = "ENRAGED"
+
+        return {
+            "boss_hp": self.boss_hp,
+            "boss_max_hp": self.boss_max_hp,
+            "player_hp": self.player_hp,
+            "player_max_hp": self.player_max_hp,
+            "boss_state": self.boss_state,
+            "boss_attack_timer": round(self.attack_timer, 1),
+            "incoming_attack": self.incoming_attack,
+            "parry_window_sec": round(max(0.0, self.parry_window_left), 1),
+            "parry_success": parry_success,
+            "parry_failed": parry_failed,
+            "combo_streak": self.combo_streak,
+            "combo_multiplier": self.damage_multiplier,
+            "streak_collapsed": self.streak_collapsed,
+            "combat_damage_dealt": damage_dealt,
+            "combat_damage_taken": damage_taken,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Phase 5 REST API Endpoints
 # ---------------------------------------------------------------------------
 
@@ -1284,6 +1437,7 @@ async def websocket_endpoint(websocket: WebSocket):
     current_exercise = "squats"
     current_difficulty = "standard"
     engine: BaseExerciseEngine = SquatEngine(global_telemetry, difficulty=current_difficulty)
+    combat_engine = BossCombatEngine()
 
     try:
         while True:
@@ -1293,6 +1447,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if data.get("action") == "reset":
                 engine.reset()
                 global_telemetry.reset()
+                combat_engine.reset()
                 await websocket.send_json({
                     "event": "SESSION_RESET",
                     "status": "RESET_COMPLETE",
@@ -1306,6 +1461,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     "damage_taken": 0,
                     "purity": 100.0,
                     "audio_cue": "Session reset",
+                    "boss_hp": 500,
+                    "boss_max_hp": 500,
+                    "player_hp": 100,
+                    "player_max_hp": 100,
+                    "boss_state": "STANDARD",
+                    "boss_attack_timer": 10.0,
+                    "incoming_attack": False,
+                    "parry_window_sec": 0.0,
+                    "combo_streak": 0,
+                    "combo_multiplier": 1.0,
                 })
                 continue
 
@@ -1324,6 +1489,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     "status": "TRACKING",
                     "message": f"SWITCHED TO {current_exercise.upper()} ({current_difficulty.upper()})",
                     "audio_cue": f"Ready for {current_exercise}",
+                    "boss_hp": combat_engine.boss_hp,
+                    "player_hp": combat_engine.player_hp,
+                    "boss_state": combat_engine.boss_state,
+                    "combo_streak": combat_engine.combo_streak,
+                    "combo_multiplier": combat_engine.damage_multiplier,
                 })
                 continue
 
@@ -1377,6 +1547,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 active_ankle = l_ak or r_ak
 
             now = time.time()
+            payload: Dict[str, Any] = {}
 
             # Route to the appropriate exercise kinematic state machine
             if current_exercise == "pushups":
@@ -1389,9 +1560,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         ankle=active_ankle,
                         now=now,
                     )
-                    await websocket.send_json(payload)
                 else:
-                    await websocket.send_json({
+                    payload = {
                         "event": "FRAME",
                         "status": "TRACKING",
                         "phase": "CALIBRATING",
@@ -1409,7 +1579,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "purity": 100.0,
                         "active_joint_index": 13,
                         "fault_joint_indices": [],
-                    })
+                    }
             elif current_exercise == "overhead_press":
                 if active_hip and active_shoulder and active_elbow:
                     payload = engine.process(
@@ -1420,9 +1590,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         wrist=active_wrist,
                         now=now,
                     )
-                    await websocket.send_json(payload)
                 else:
-                    await websocket.send_json({
+                    payload = {
                         "event": "FRAME",
                         "status": "TRACKING",
                         "phase": "CALIBRATING",
@@ -1440,7 +1609,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "purity": 100.0,
                         "active_joint_index": 11,
                         "fault_joint_indices": [],
-                    })
+                    }
             elif current_exercise == "rdl":
                 if active_shoulder and active_hip and active_knee:
                     payload = engine.process(
@@ -1450,9 +1619,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         ankle=active_ankle,
                         now=now,
                     )
-                    await websocket.send_json(payload)
                 else:
-                    await websocket.send_json({
+                    payload = {
                         "event": "FRAME",
                         "status": "TRACKING",
                         "phase": "CALIBRATING",
@@ -1470,7 +1638,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "purity": 100.0,
                         "active_joint_index": 23,
                         "fault_joint_indices": [],
-                    })
+                    }
             else:  # squats default
                 if active_hip and active_knee and active_ankle:
                     payload = engine.process(
@@ -1487,9 +1655,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         left_shoulder=l_sh,
                         right_shoulder=r_sh,
                     )
-                    await websocket.send_json(payload)
                 else:
-                    await websocket.send_json({
+                    payload = {
                         "event": "FRAME",
                         "status": "TRACKING",
                         "phase": "CALIBRATING",
@@ -1507,7 +1674,48 @@ async def websocket_endpoint(websocket: WebSocket):
                         "purity": 100.0,
                         "active_joint_index": 25,
                         "fault_joint_indices": [],
-                    })
+                    }
+
+            # Run Authoritative Combat Engine Update
+            is_holding = bool(payload.get("phase") == "HOLDING" or payload.get("hold_progress", 0) > 0.3)
+            had_fault = bool(payload.get("has_fault", False) or payload.get("event") == "EGO_LIFT" or payload.get("status") == "penalty")
+            rep_count = payload.get("rep_count", 0)
+            is_crit = bool(payload.get("is_critical", False))
+
+            combat_data = combat_engine.update(
+                now=now,
+                is_holding=is_holding,
+                rep_count=rep_count,
+                had_fault=had_fault,
+                is_critical=is_crit,
+            )
+            payload.update(combat_data)
+
+            # Reflect dynamic combo damage into payload
+            if combat_data.get("combat_damage_dealt", 0) > 0:
+                payload["damage"] = combat_data["combat_damage_dealt"]
+            if combat_data.get("combat_damage_taken", 0) > 0:
+                payload["damage_taken"] = combat_data["combat_damage_taken"]
+
+            # Set dynamic status and audio messages
+            if combat_data.get("parry_success"):
+                payload["status"] = "hit"
+                payload["message"] = "PARRY SUCCESSFUL! (+50 COUNTER DMG)"
+                payload["audio_cue"] = "Parry successful!"
+            elif combat_data.get("incoming_attack"):
+                sec_left = combat_data.get("parry_window_sec", 3.0)
+                payload["message"] = f"INCOMING ATTACK - PARRY BY HOLDING DEPTH ({sec_left:.1f}s)"
+                if not getattr(combat_engine, "telegraph_announced", False):
+                    payload["audio_cue"] = "Incoming attack! Hold depth to parry!"
+                    combat_engine.telegraph_announced = True
+            else:
+                combat_engine.telegraph_announced = False
+
+            if combat_data.get("streak_collapsed"):
+                payload["message"] = "FORM FAULT - STREAK COLLAPSED!"
+                payload["audio_cue"] = "Streak lost"
+
+            await websocket.send_json(payload)
 
     except WebSocketDisconnect:
         pass
