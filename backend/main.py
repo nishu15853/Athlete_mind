@@ -53,24 +53,84 @@ def calculate_angle_3d(a: Any, b: Any, c: Any) -> float:
     return round(float(angle), 1)
 
 
+def calculate_angle_2d(a: Any, b: Any, c: Any) -> float:
+    """Calculates 2D joint angle at vertex b using arctan2 on (x, y) coordinates."""
+    if a is None or b is None or c is None:
+        return 180.0
+    ax, ay = float(a[0]), float(a[1])
+    bx, by = float(b[0]), float(b[1])
+    cx, cy = float(c[0]), float(c[1])
+    u = np.array([ax - bx, ay - by], dtype=float)
+    v = np.array([cx - bx, cy - by], dtype=float)
+    norm_u = float(np.linalg.norm(u))
+    norm_v = float(np.linalg.norm(v))
+    if norm_u < 1e-6 or norm_v < 1e-6:
+        return 180.0
+    angle_u = np.arctan2(u[1], u[0])
+    angle_v = np.arctan2(v[1], v[0])
+    diff = abs(angle_u - angle_v) * 180.0 / np.pi
+    if diff > 180.0:
+        diff = 360.0 - diff
+    return round(float(diff), 1)
+
+
 calculate_angle = calculate_angle_3d
 
 
 def detect_orientation(left_shoulder: Any, right_shoulder: Any, left_hip: Any, right_hip: Any) -> str:
     """Auto-Orientation Detection:
-    Calculate horizontal shoulder width |x11 - x12| and hip width |x23 - x24|.
-    If width > 0.15: user is facing camera (Front View / Coronal).
-    If width <= 0.15: user is turned sideways (Side View / Sagittal).
+    Compute normalized horizontal shoulder span: delta_x_sh = |x11 - x12|
+    and hip span: delta_x_hip = |x23 - x24|.
+    Average torso width W = (delta_x_sh + delta_x_hip) / 2.
+    If W >= 0.12: FRONT_PROFILE ("front")
+    If W < 0.12: SIDE_PROFILE ("side")
     """
-    sh_w = abs(float(left_shoulder[0]) - float(right_shoulder[0])) if (left_shoulder and right_shoulder) else 0.0
-    hip_w = abs(float(left_hip[0]) - float(right_hip[0])) if (left_hip and right_hip) else 0.0
-    width = max(sh_w, hip_w)
-    return "front" if width > 0.15 else "side"
+    sh_w = abs(float(left_shoulder[0]) - float(right_shoulder[0])) if (left_shoulder and right_shoulder) else None
+    hip_w = abs(float(left_hip[0]) - float(right_hip[0])) if (left_hip and right_hip) else None
+    if sh_w is not None and hip_w is not None:
+        w = (sh_w + hip_w) / 2.0
+    elif sh_w is not None:
+        w = sh_w
+    elif hip_w is not None:
+        w = hip_w
+    else:
+        w = 0.0
+    return "front" if w >= 0.12 else "side"
+
+
+class OrientationTracker:
+    """Temporal hysteresis buffer (5 consecutive frames) before switching profiles to prevent flicker."""
+
+    def __init__(self, initial_profile: str = "FRONT"):
+        self.active_profile = initial_profile  # "FRONT" or "SIDE"
+        self.candidate_history: List[str] = []
+        self.hysteresis_frames = 5
+
+    def reset(self, profile: str = "FRONT"):
+        self.active_profile = profile
+        self.candidate_history.clear()
+
+    def update(self, left_shoulder: Any, right_shoulder: Any, left_hip: Any, right_hip: Any) -> str:
+        raw = detect_orientation(left_shoulder, right_shoulder, left_hip, right_hip)
+        cand = "FRONT" if raw == "front" else "SIDE"
+        self.candidate_history.append(cand)
+        if len(self.candidate_history) > self.hysteresis_frames:
+            self.candidate_history.pop(0)
+
+        # Only switch profile if all frames in the hysteresis buffer agree
+        if len(self.candidate_history) == self.hysteresis_frames:
+            if all(c == cand for c in self.candidate_history):
+                self.active_profile = cand
+        elif len(self.candidate_history) == 1:
+            self.active_profile = cand
+
+        return self.active_profile
 
 
 def check_knee_valgus(hip: Any, knee: Any, ankle: Any, side: str = "left", right_hip: Any = None, strict: bool = False) -> bool:
     """Knee valgus tracking: flags if knee collapses inward relative to hip & ankle.
-    If strict: threshold shrunk to 0.015 (Clinical Strictness Protocol +/-10%).
+    If strict: threshold shrunk to 0.02 (Clinical Strictness Protocol).
+    Default: threshold is 0.05.
     """
     if not (hip and knee and ankle):
         return False
@@ -86,7 +146,7 @@ def check_knee_valgus(hip: Any, knee: Any, ankle: Any, side: str = "left", right
             return False
         expected_kx = hx + ((ky - hy) / dy) * (ax - hx)
         inward = (expected_kx - kx) if hx > mid_x else (kx - expected_kx)
-        thresh = 0.015 if strict else 0.04
+        thresh = 0.02 if strict else 0.05
         return bool(inward > thresh)
 
     return False
@@ -95,14 +155,15 @@ def check_knee_valgus(hip: Any, knee: Any, ankle: Any, side: str = "left", right
 def check_frontal_valgus(left_knee: Any, right_knee: Any, left_ankle: Any, right_ankle: Any, strict: bool = False) -> bool:
     """Frontal Valgus / Alignment Tracking:
     Compare |x_left_knee - x_right_knee| against |x_left_ankle - x_right_ankle|.
-    If strict: threshold is 0.90 (valgus margin +/-10%).
-    Default: threshold is 0.75 (valgus margin +/-25%).
+    Ratio = knee_width / ankle_width.
+    Flag valgus only if Ratio < 0.65 (relaxed from 0.75, allowing natural knee taper).
+    If strict (CLINICAL_STRICT): threshold is 0.85 (tighter tolerance).
     """
     if not (left_knee and right_knee and left_ankle and right_ankle):
         return False
     knee_sep = abs(float(left_knee[0]) - float(right_knee[0]))
     ankle_sep = abs(float(left_ankle[0]) - float(right_ankle[0]))
-    thresh = 0.90 if strict else 0.75
+    thresh = 0.85 if strict else 0.65
     return bool(ankle_sep >= 0.05 and knee_sep < (ankle_sep * thresh))
 
 
@@ -314,6 +375,8 @@ class BaseExerciseEngine:
         active_joint_idx: int,
         fault_joint_indices: List[int],
         view_orientation: str = "side",
+        active_profile: str = "FRONT",
+        metric_value: float = 0.0,
     ) -> Dict[str, Any]:
         purity = 100.0
         if has_fault:
@@ -329,6 +392,8 @@ class BaseExerciseEngine:
             "exercise_type": self.exercise_type,
             "difficulty": self.difficulty,
             "view_orientation": view_orientation,
+            "active_profile": active_profile,
+            "metric_value": metric_value,
             "status": status,
             "phase": phase,
             "primary_angle": primary_ang,
@@ -365,17 +430,21 @@ class BaseExerciseEngine:
 # ---------------------------------------------------------------------------
 
 class SquatEngine(BaseExerciseEngine):
-    """Squat Kinematics: 3D Hip(23) - Knee(25) - Ankle(27) + Medial Valgus & Frontal Depth."""
+    """Squat Kinematics: Dual Profile (Side Sagittal & Front Coronal) with adaptive thresholds."""
 
     def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard", modifiers: Optional[List[str]] = None):
         super().__init__("squats", difficulty, telemetry, modifiers=modifiers)
-        self.y_hip_standing: Optional[float] = None
-        self.y_knee_standing: Optional[float] = None
+        self.orientation_tracker = OrientationTracker(initial_profile="FRONT")
+        self.y_hip_stand: Optional[float] = None
+        self.h_stand: Optional[float] = None
+        self.valgus_consecutive_frames = 0
 
     def reset(self):
         super().reset()
-        self.y_hip_standing = None
-        self.y_knee_standing = None
+        self.orientation_tracker.reset("FRONT")
+        self.y_hip_stand = None
+        self.h_stand = None
+        self.valgus_consecutive_frames = 0
 
     def process(self, hip: Any, knee: Any, ankle: Any, shoulder: Any = None,
                 now: Optional[float] = None, right_hip: Any = None,
@@ -386,28 +455,19 @@ class SquatEngine(BaseExerciseEngine):
         if now is None:
             now = time.time()
 
-        # Targets based on difficulty modifier & protocol mutators
-        if self.difficulty == "rehab":
-            bottom_depth_max = 100.0
-            bottom_depth_min = 60.0
-            stand_min = 150.0
-            target_hold = 1.0
-        elif self.difficulty == "athlete":
-            bottom_depth_max = 75.0
-            bottom_depth_min = 55.0
-            stand_min = 160.0
-            target_hold = 2.0
-        else:  # standard
-            bottom_depth_max = 95.0
-            bottom_depth_min = 70.0
-            stand_min = 155.0
+        # Hold target baseline is 1.0s (adaptive & forgiving)
+        target_hold = 1.0
+        if self.difficulty == "athlete":
             target_hold = 1.5
+        elif self.difficulty == "rehab":
+            target_hold = 0.8
 
         if "HYPER_TENSION" in self.modifiers:
             target_hold = 3.0
 
-        # Detect Front vs Side orientation
-        view_mode = detect_orientation(left_shoulder, right_shoulder, hip, right_hip)
+        # Auto-Orientation Detection with 5-frame temporal hysteresis buffer
+        active_profile = self.orientation_tracker.update(left_shoulder, right_shoulder, hip, right_hip)
+        view_mode = "front" if active_profile == "FRONT" else "side"
 
         # Handle Stun
         if self.is_stunned:
@@ -436,57 +496,116 @@ class SquatEngine(BaseExerciseEngine):
                     active_joint_idx=25,
                     fault_joint_indices=[23, 25, 27],
                     view_orientation=view_mode,
+                    active_profile=active_profile,
+                    metric_value=0.0,
                 )
 
-        # 3D Vector Joint Angle
-        raw_knee = calculate_angle_3d(hip, knee, ankle)
-        raw_hip = calculate_angle_3d(shoulder, hip, knee) if shoulder else calculate_angle_3d([float(hip[0]), float(hip[1]) - 0.4, 0.0], hip, knee)
-        knee_ang, hip_ang = self._smooth_angles(raw_knee, raw_hip)
+        # Select limb with higher visibility for Sagittal / 2D Tracking
+        def get_vis(pt):
+            return float(pt[3]) if (pt and len(pt) >= 4) else 1.0
 
-        self.telemetry.log_angle_sample(knee_ang, now)
-        if knee_ang < self.current_rep_min_angle:
-            self.current_rep_min_angle = knee_ang
+        l_vis = (get_vis(hip) + get_vis(knee) + get_vis(ankle)) / 3.0
+        r_vis = (get_vis(right_hip) + get_vis(right_knee) + get_vis(right_ankle)) / 3.0 if (right_hip and right_knee and right_ankle) else 0.0
 
-        # Frontal Valgus Tracking with Clinical Strictness Protocol
+        if r_vis > l_vis + 0.10 and right_hip and right_knee and right_ankle:
+            chosen_hip, chosen_knee, chosen_ankle = right_hip, right_knee, right_ankle
+        else:
+            chosen_hip, chosen_knee, chosen_ankle = hip, knee, ankle
+
         valgus = False
         strict = "CLINICAL_STRICT" in self.modifiers
-        if left_knee and right_knee and left_ankle and right_ankle:
-            valgus = check_frontal_valgus(left_knee, right_knee, left_ankle, right_ankle, strict=strict)
+
+        if active_profile == "SIDE":
+            # ---------------------------------------------------------------
+            # 2. Relaxed & Adaptive Side Profile Mode (Sagittal View)
+            # ---------------------------------------------------------------
+            # Knee angle using 2D arctan2 on (x, y) of limb with higher visibility
+            raw_knee_2d = calculate_angle_2d(chosen_hip, chosen_knee, chosen_ankle)
+            raw_hip_2d = calculate_angle_2d(shoulder, hip, knee) if shoulder else 90.0
+            knee_ang, hip_ang = self._smooth_angles(raw_knee_2d, raw_hip_2d)
+
+            self.telemetry.log_angle_sample(knee_ang, now)
+            if knee_ang < self.current_rep_min_angle:
+                self.current_rep_min_angle = knee_ang
+
+            # Forgiving Thresholds:
+            # Depth: Knee angle <= 100 deg (relaxed from strict < 90 deg)
+            is_bottom_depth = (knee_ang <= 100.0)
+            # Standing Reset: Knee angle >= 150 deg (relaxed from 160 deg)
+            is_standing = (knee_ang >= 150.0)
+
+            # Knee Valgus: Inactive in Side Mode (cannot be reliably measured in sagittal plane)
+            valgus = False
+            self.valgus_consecutive_frames = 0
+
+            primary_name = "Knee"
+            secondary_name = "Hip"
+            metric_value = round(knee_ang, 1)
+
+            # Anti-Ego Lift
+            is_shallow = (knee_ang < 130.0 and not is_bottom_depth)
+
         else:
-            valgus = check_knee_valgus(hip, knee, ankle, side="left", right_hip=right_hip, strict=strict)
+            # ---------------------------------------------------------------
+            # 3. Normalized Front Profile Mode (Coronal View)
+            # ---------------------------------------------------------------
+            raw_knee_3d = calculate_angle_3d(hip, knee, ankle)
+            knee_ang, hip_ang = self._smooth_angles(raw_knee_3d, 180.0)
 
-        if valgus:
-            self.current_rep_had_fault = True
-            self.current_rep_fault_name = "knee_valgus"
-            self.telemetry.record_valgus()
+            self.telemetry.log_angle_sample(knee_ang, now)
+            if knee_ang < self.current_rep_min_angle:
+                self.current_rep_min_angle = knee_ang
 
-        # In Front View: knee flex projects along z-axis. Combine 3D angle with vertical hip drop level
-        hip_y = float(hip[1])
-        knee_y = float(knee[1])
+            # Standing baseline: capture standing hip-to-ankle vertical distance
+            y_hip_mid = (float(hip[1]) + float(right_hip[1])) / 2.0 if right_hip else float(hip[1])
+            y_ankle_mid = (float(ankle[1]) + float(right_ankle[1])) / 2.0 if right_ankle else float(ankle[1])
+            curr_h = abs(y_hip_mid - y_ankle_mid)
 
-        # Standing posture check & reference tracking
-        is_standing = (knee_ang >= stand_min) and (hip_ang >= 140.0)
-        if is_standing or self.y_hip_standing is None:
-            self.y_hip_standing = hip_y
-            self.y_knee_standing = knee_y
+            if self.y_hip_stand is None or (y_hip_mid < self.y_hip_stand and (knee_ang >= 145.0 or self.phase == "STARTING")):
+                self.y_hip_stand = y_hip_mid
+                self.h_stand = max(0.15, curr_h)
+            elif knee_ang >= 150.0:
+                self.y_hip_stand = min(self.y_hip_stand, y_hip_mid)
+                self.h_stand = max(0.15, curr_h)
 
-        # Depth Ratio = (y_hip - y_knee_standing) / (y_hip_standing - y_knee_standing)
-        depth_ratio = 0.0
-        if self.y_hip_standing is not None and self.y_knee_standing is not None:
-            denom = self.y_hip_standing - self.y_knee_standing
-            if abs(denom) > 1e-4:
-                depth_ratio = abs((hip_y - self.y_knee_standing) / denom)
+            h_ref = self.h_stand or max(0.15, curr_h)
+            y_stand_ref = self.y_hip_stand if self.y_hip_stand is not None else y_hip_mid
+            drop_ratio = max(0.0, (y_hip_mid - y_stand_ref) / max(0.1, h_ref))
 
-        # When y_hip drops to the horizontal level of y_knee, trigger squat bottom hold
-        hip_at_knee_level = bool(hip_y >= knee_y - 0.05) or (depth_ratio <= 0.25 and depth_ratio > 0)
+            # Forgiving Valgus Threshold: Ratio = |x_lk - x_rk| / |x_la - x_ra| < 0.65 (3-frame filter)
+            raw_valgus = False
+            if left_knee and right_knee and left_ankle and right_ankle:
+                raw_valgus = check_frontal_valgus(left_knee, right_knee, left_ankle, right_ankle, strict=strict)
+            elif right_hip:
+                raw_valgus = check_knee_valgus(hip, knee, ankle, side="left", right_hip=right_hip, strict=strict)
 
-        if view_mode == "front":
-            is_bottom_depth = (knee_ang <= bottom_depth_max or hip_at_knee_level) and not valgus
-        else:
-            is_bottom_depth = (bottom_depth_min <= knee_ang <= bottom_depth_max) and (hip_ang < 100.0) and not valgus
+            if raw_valgus:
+                self.valgus_consecutive_frames += 1
+            else:
+                self.valgus_consecutive_frames = 0
 
-        # Anti Ego-Lift
-        if raw_knee < 140.0 or knee_ang < 145.0:
+            valgus = (self.valgus_consecutive_frames >= 3)
+            if valgus:
+                self.current_rep_had_fault = True
+                self.current_rep_fault_name = "knee_valgus"
+                self.telemetry.record_valgus()
+
+            # Depth Threshold: Drop Ratio >= 0.28 (hip drops >= 28% lower body length) or 3D knee <= 105 deg
+            hip_at_knee = bool(float(hip[1]) >= float(knee[1]) - 0.05)
+            is_bottom_depth = (drop_ratio >= 0.28 or knee_ang <= 105.0 or hip_at_knee) and not valgus
+
+            # Standing Reset: Drop Ratio <= 0.10 or knee angle >= 150 deg
+            is_standing = (drop_ratio <= 0.10 or knee_ang >= 150.0)
+
+            primary_name = "Drop"
+            secondary_name = "Knee"
+            metric_value = round(drop_ratio * 100.0, 1)
+
+            # Anti-Ego Lift
+            is_shallow = (drop_ratio > 0.15 and not is_bottom_depth)
+
+        # Anti-Ego Lift Logic with forgiving multi-bounce filter
+        if is_shallow:
             self.in_shallow_dip = True
 
         if self.in_shallow_dip and is_standing:
@@ -494,9 +613,9 @@ class SquatEngine(BaseExerciseEngine):
                 self.telemetry.record_depth_failure()
                 self.sloppy_dips.append(now)
                 self.sloppy_dips = [t for t in self.sloppy_dips if now - t <= 3.0]
-                if len(self.sloppy_dips) >= 2:
+                if len(self.sloppy_dips) >= 3:
                     self.is_stunned = True
-                    self.stun_until = now + 3.0
+                    self.stun_until = now + 2.5
                     self.weapon_overheated = True
                     self.telemetry.record_ego_lift()
                     self.sloppy_dips.clear()
@@ -505,28 +624,33 @@ class SquatEngine(BaseExerciseEngine):
                         status="penalty",
                         phase="STUNNED",
                         primary_ang=knee_ang,
-                        primary_name="Knee",
+                        primary_name=primary_name,
                         secondary_ang=hip_ang,
-                        secondary_name="Hip",
+                        secondary_name=secondary_name,
                         hold_dur=0.0,
                         target_hold=target_hold,
                         damage=0,
-                        damage_taken=25,
+                        damage_taken=20,
                         has_fault=True,
                         fault_type="ego_lift",
                         overheated=True,
-                        message="EGO LIFT DETECTED - STUNNED! (-25 HP)",
+                        message="EGO LIFT DETECTED - CONTROL TEMPO!",
                         audio_cue="Slow down, control your tempo",
                         event="EGO_LIFT",
                         active_joint_idx=25,
                         fault_joint_indices=[23, 25, 27],
                         view_orientation=view_mode,
+                        active_profile=active_profile,
+                        metric_value=metric_value,
                     )
             self.in_shallow_dip = False
 
         status = "TRACKING"
         damage = 0
-        message = f"SQUAT DOWN ({view_mode.upper()} VIEW • TARGET < {int(bottom_depth_max)}°)"
+        if active_profile == "SIDE":
+            message = f"SQUAT DOWN (SIDE VIEW • TARGET <= 100° • NOW {int(knee_ang)}°)"
+        else:
+            message = f"SQUAT DOWN (FRONT VIEW • HIP DROP >= 28% • NOW {int(metric_value)}%)"
         audio_cue = ""
         event = "FRAME"
 
@@ -588,7 +712,10 @@ class SquatEngine(BaseExerciseEngine):
                 elif self.rep_hit_awarded:
                     message = "RETURN TO STANDING"
                 else:
-                    message = f"SQUAT TO {int(bottom_depth_max)}° ({int(knee_ang)}°)"
+                    if active_profile == "SIDE":
+                        message = f"SQUAT TO 100° ({int(knee_ang)}°)"
+                    else:
+                        message = f"LOWER HIPS TO 28% ({int(metric_value)}%)"
 
         fault_type = "valgus" if valgus else ""
         fault_joints = [25, 26] if valgus else []
@@ -597,9 +724,9 @@ class SquatEngine(BaseExerciseEngine):
             status=status,
             phase=self.phase,
             primary_ang=knee_ang,
-            primary_name="Knee",
+            primary_name=primary_name,
             secondary_ang=hip_ang,
-            secondary_name="Hip",
+            secondary_name=secondary_name,
             hold_dur=self.hold_duration,
             target_hold=target_hold,
             damage=damage,
@@ -613,6 +740,8 @@ class SquatEngine(BaseExerciseEngine):
             active_joint_idx=25,
             fault_joint_indices=fault_joints,
             view_orientation=view_mode,
+            active_profile=active_profile,
+            metric_value=metric_value,
         )
 
     def process_frame(self, *args, **kwargs) -> Dict[str, Any]:
@@ -1765,6 +1894,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         "status": "TRACKING",
                         "phase": "CALIBRATING",
                         "exercise_type": current_exercise,
+                        "view_orientation": "side",
+                        "active_profile": "SIDE",
+                        "metric_value": 180.0,
                         "primary_angle": 180.0,
                         "primary_angle_name": "Elbow",
                         "secondary_angle": 180.0,
@@ -1795,6 +1927,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         "status": "TRACKING",
                         "phase": "CALIBRATING",
                         "exercise_type": current_exercise,
+                        "view_orientation": "front",
+                        "active_profile": "FRONT",
+                        "metric_value": 80.0,
                         "primary_angle": 80.0,
                         "primary_angle_name": "Shoulder",
                         "secondary_angle": 180.0,
@@ -1824,6 +1959,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         "status": "TRACKING",
                         "phase": "CALIBRATING",
                         "exercise_type": current_exercise,
+                        "view_orientation": "side",
+                        "active_profile": "SIDE",
+                        "metric_value": 180.0,
                         "primary_angle": 180.0,
                         "primary_angle_name": "Hip Hinge",
                         "secondary_angle": 165.0,
@@ -1860,6 +1998,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         "status": "TRACKING",
                         "phase": "CALIBRATING",
                         "exercise_type": "squats",
+                        "view_orientation": "front",
+                        "active_profile": "FRONT",
+                        "metric_value": 0.0,
                         "primary_angle": 180.0,
                         "primary_angle_name": "Knee",
                         "secondary_angle": 180.0,
@@ -1874,6 +2015,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         "active_joint_index": 25,
                         "fault_joint_indices": [],
                     }
+
+            # Guarantee active_profile & metric_value
+            if "active_profile" not in payload:
+                payload["active_profile"] = "SIDE" if payload.get("view_orientation") == "side" else "FRONT"
+            if "metric_value" not in payload:
+                payload["metric_value"] = payload.get("primary_angle", 0.0)
 
             # Run Authoritative Combat Engine Update
             is_holding = bool(payload.get("phase") == "HOLDING" or payload.get("hold_progress", 0) > 0.3)

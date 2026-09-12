@@ -153,6 +153,8 @@ interface BioEnginePacket {
   exercise_type?: string;
   difficulty?: string;
   view_orientation?: string;
+  active_profile?: "SIDE" | "FRONT";
+  metric_value?: number;
   status: string;
   phase: string;
   primary_angle?: number;
@@ -624,6 +626,8 @@ export default function AthleteMindPage() {
   const [exercise, setExercise] = useState<ExerciseType>("squats");
   const [difficulty, setDifficulty] = useState<DifficultyType>("standard");
   const [orientationView, setOrientationView] = useState<string>("front");
+  const [activeProfile, setActiveProfile] = useState<"SIDE" | "FRONT">("FRONT");
+  const [profileMetricValue, setProfileMetricValue] = useState<number>(0);
 
   // Dynamic Joint Angle Tracking
   const [primaryAngle, setPrimaryAngle] = useState(180);
@@ -656,7 +660,7 @@ export default function AthleteMindPage() {
   const [repCount, setRepCount] = useState(0);
   const [formPurity, setFormPurity] = useState(100);
   const [holdProgress, setHoldProgress] = useState(0);
-  const [targetHoldDuration, setTargetHoldDuration] = useState(1.5);
+  const [targetHoldDuration, setTargetHoldDuration] = useState(1.0);
 
   // Banner
   const [combatBanner, setCombatBanner] = useState("READY • POSITION BODY");
@@ -852,7 +856,7 @@ export default function AthleteMindPage() {
       if (next.includes("HYPER_TENSION")) {
         setTargetHoldDuration(3.0);
       } else {
-        setTargetHoldDuration(difficultyRef.current === "rehab" ? 1.0 : difficultyRef.current === "athlete" ? 2.0 : 1.5);
+        setTargetHoldDuration(difficultyRef.current === "rehab" ? 0.8 : difficultyRef.current === "athlete" ? 1.5 : 1.0);
       }
 
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -1010,7 +1014,7 @@ export default function AthleteMindPage() {
     if (modifiersRef.current.includes("HYPER_TENSION")) {
       setTargetHoldDuration(3.0);
     } else {
-      setTargetHoldDuration(newDiff === "rehab" ? 1.0 : newDiff === "athlete" ? 2.0 : 1.5);
+      setTargetHoldDuration(newDiff === "rehab" ? 0.8 : newDiff === "athlete" ? 1.5 : 1.0);
     }
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(
@@ -1585,9 +1589,15 @@ export default function AthleteMindPage() {
       try {
         const data: BioEnginePacket = JSON.parse(event.data);
 
-        // Update Orientation
+        // Update Orientation & Active Evaluation Profile
         if (data.view_orientation) {
           setOrientationView(data.view_orientation);
+        }
+        if (data.active_profile) {
+          setActiveProfile(data.active_profile);
+        }
+        if (data.metric_value !== undefined) {
+          setProfileMetricValue(data.metric_value);
         }
 
         // Update Dynamic Angle Labels
@@ -2284,6 +2294,26 @@ export default function AthleteMindPage() {
             <div className="absolute inset-0 z-35 bg-rose-600/35 pointer-events-none mix-blend-screen animate-pulse backdrop-invert" />
           )}
 
+          {/* Active Evaluation Profile & Dynamic Metric Badge Inside Camera Reticle */}
+          <div className="absolute top-4 left-5 z-30 pointer-events-none flex items-center gap-2">
+            <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-black/80 border border-cyan-500/50 backdrop-blur-md shadow-[0_0_20px_rgba(0,240,255,0.25)]">
+              <span className={`w-2.5 h-2.5 rounded-full ${activeProfile === "SIDE" ? "bg-amber-400" : "bg-cyan-400"} animate-pulse shadow-[0_0_10px_currentColor]`} />
+              <div className="flex flex-col text-left">
+                <div className="text-[10px] font-black uppercase tracking-wider text-cyan-300 font-mono">
+                  {activeProfile === "SIDE" ? "MODE: SIDE PROFILE [KNEE ANGLE]" : "MODE: FRONT PROFILE [HIP DROP]"}
+                </div>
+                <div className="text-xs font-black font-mono tracking-tight text-white flex items-center gap-2">
+                  <span className="text-slate-400 text-[10px]">SIGNAL:</span>
+                  <span className={activeProfile === "SIDE" ? "text-amber-300" : "text-emerald-400"}>
+                    {activeProfile === "SIDE"
+                      ? `${Math.round(profileMetricValue || primaryAngle)}° (DEPTH <= 100°)`
+                      : `${Math.round(profileMetricValue)}% DROP (DEPTH >= 28%)`}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Timed Evasion & Biomechanical Parry Reticle Overlay */}
           {incomingAttack && matchStatus === "ACTIVE" && (
             <div className="absolute inset-0 z-35 flex flex-col items-center justify-center pointer-events-none">
@@ -2356,15 +2386,18 @@ export default function AthleteMindPage() {
             )}
           </div>
 
-          <div className="absolute bottom-4 left-6 z-20 flex items-center gap-2 text-xs text-slate-400">
+          <div className="absolute bottom-4 left-6 z-20 flex flex-wrap items-center gap-2 text-xs text-slate-400">
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 border border-slate-700">
               <span className={`w-2 h-2 rounded-full ${cameraActive ? "bg-emerald-400" : "bg-amber-400"}`} />
               <span>{cameraActive ? "3D SENSOR ACTIVE" : "INITIALIZING CAMERA..."}</span>
             </div>
-            <div className="px-2.5 py-1 rounded-full bg-black/60 border border-slate-700 text-cyan-300 text-[11px]">
-              VIEW: {orientationView.toUpperCase()}
+            <div className="px-2.5 py-1 rounded-full bg-black/70 border border-cyan-500/50 text-cyan-300 text-[11px] font-bold">
+              {activeProfile === "SIDE" ? "📐 SAGITTAL (SIDE)" : "🧍 CORONAL (FRONT)"}
             </div>
-            <div className="px-2.5 py-1 rounded-full bg-black/60 border border-slate-700 text-amber-300 text-[11px]">
+            <div className="px-2.5 py-1 rounded-full bg-black/70 border border-amber-500/50 text-amber-300 text-[11px] font-bold">
+              {activeProfile === "SIDE" ? `KNEE: ${Math.round(profileMetricValue || primaryAngle)}°` : `DROP: ${Math.round(profileMetricValue)}%`}
+            </div>
+            <div className="px-2.5 py-1 rounded-full bg-black/60 border border-slate-700 text-slate-300 text-[11px]">
               HOLD: {targetHoldDuration.toFixed(1)}s
             </div>
           </div>

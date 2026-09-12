@@ -342,7 +342,166 @@ def test_phase7_mutators_and_leaderboard():
     print("\n[OK] ALL PHASE 7 PROGRESSIVE MUTATOR & LEADERBOARD TESTS PASSED!")
 
 
+def test_dual_profile_adaptive_kinematics():
+    print("\n--- 11. Testing Dual Profile Adaptive Kinematics & Hysteresis ---")
+    from main import OrientationTracker, calculate_angle_2d
+
+    # 1. Test 2D Angle via arctan2
+    # 90-degree right angle (vertex at [0.5, 0.5])
+    a_90 = calculate_angle_2d([0.2, 0.5], [0.5, 0.5], [0.5, 0.8])
+    assert abs(a_90 - 90.0) < 0.5
+    # Straight angle
+    a_180 = calculate_angle_2d([0.5, 0.2], [0.5, 0.5], [0.5, 0.8])
+    assert abs(a_180 - 180.0) < 0.5
+
+    # 2. Test Orientation Hysteresis Buffer (5 consecutive frames required to switch)
+    tracker = OrientationTracker(initial_profile="FRONT")
+    assert tracker.active_profile == "FRONT"
+
+    # Front coordinates: shoulder width = 0.2, hip width = 0.14 -> W = 0.17 >= 0.12
+    sh_l_front, sh_r_front = [0.4, 0.2], [0.6, 0.2]
+    hip_l_front, hip_r_front = [0.43, 0.5], [0.57, 0.5]
+
+    # Side coordinates: shoulder width = 0.04, hip width = 0.03 -> W = 0.035 < 0.12
+    sh_l_side, sh_r_side = [0.5, 0.2], [0.54, 0.2]
+    hip_l_side, hip_r_side = [0.5, 0.5], [0.53, 0.5]
+
+    tracker.update(sh_l_front, sh_r_front, hip_l_front, hip_r_front)
+    assert tracker.active_profile == "FRONT"
+
+    # Feed 3 side frames: hysteresis buffer should hold FRONT
+    for _ in range(3):
+        res = tracker.update(sh_l_side, sh_r_side, hip_l_side, hip_r_side)
+        assert res == "FRONT"
+
+    # 4th side frame: still FRONT
+    assert tracker.update(sh_l_side, sh_r_side, hip_l_side, hip_r_side) == "FRONT"
+
+    # 5th consecutive side frame: switches to SIDE!
+    assert tracker.update(sh_l_side, sh_r_side, hip_l_side, hip_r_side) == "SIDE"
+    print("5-Frame Orientation Hysteresis Smoothing Verified!")
+
+    # 3. Test Relaxed Side Profile Mode (Squat depth <= 100 deg, 1.0s hold)
+    engine = SquatEngine(global_telemetry, difficulty="standard")
+    # Feed 5 side frames to initialize into SIDE mode
+    sim_t = 500.0
+    for _ in range(5):
+        sim_t += 0.1
+        # Standing posture (knee ~180 deg)
+        res_side = engine.process(
+            hip=[0.5, 0.5, 0.0],
+            knee=[0.5, 0.7, 0.0],
+            ankle=[0.5, 0.9, 0.0],
+            shoulder=[0.5, 0.2, 0.0],
+            left_shoulder=sh_l_side,
+            right_shoulder=sh_r_side,
+            right_hip=hip_r_side,
+            now=sim_t,
+        )
+    assert res_side["active_profile"] == "SIDE"
+    assert res_side["view_orientation"] == "side"
+
+    # Knee at ~98 degrees (relaxed from < 90)
+    # Vertex at knee [0.5, 0.65], hip at [0.22, 0.65], ankle at [0.54, 0.95]
+    for _ in range(4):
+        sim_t += 0.1
+        res_squat_side = engine.process(
+            hip=[0.22, 0.65, 0.0],
+            knee=[0.5, 0.65, 0.0],
+            ankle=[0.54, 0.95, 0.0],
+            shoulder=[0.22, 0.35, 0.0],
+            left_shoulder=sh_l_side,
+            right_shoulder=sh_r_side,
+            right_hip=hip_r_side,
+            now=sim_t,
+        )
+    assert res_squat_side["active_profile"] == "SIDE"
+    assert res_squat_side["primary_angle"] <= 100.0
+    assert res_squat_side["phase"] == "HOLDING"
+    assert res_squat_side["hold_target"] == 1.0
+    assert not res_squat_side["has_fault"]  # Valgus inactive in side mode
+    print("Relaxed Side Profile Depth (<=100 deg & 1.0s hold) Verified!")
+
+    # 4. Test Normalized Front Profile Mode (Hip Drop >= 28% and 3-Frame Valgus Filter)
+    engine_front = SquatEngine(global_telemetry, difficulty="standard")
+    sim_t = 600.0
+    # Standing reference calibration frame
+    res_front_stand = engine_front.process(
+        hip=[0.45, 0.45, 0.0],
+        knee=[0.45, 0.70, 0.0],
+        ankle=[0.45, 0.95, 0.0],
+        shoulder=[0.45, 0.20, 0.0],
+        right_hip=[0.55, 0.45, 0.0],
+        left_shoulder=sh_l_front,
+        right_shoulder=sh_r_front,
+        left_knee=[0.45, 0.70, 0.0],
+        right_knee=[0.55, 0.70, 0.0],
+        left_ankle=[0.45, 0.95, 0.0],
+        right_ankle=[0.55, 0.95, 0.0],
+        now=sim_t,
+    )
+    assert res_front_stand["active_profile"] == "FRONT"
+
+    # User drops hips: hip drops from 0.45 down to 0.62 (leg length = 0.50 -> drop ratio = 0.17 / 0.50 = 34% >= 28%)
+    sim_t += 0.1
+    res_front_drop = engine_front.process(
+        hip=[0.45, 0.62, 0.0],
+        knee=[0.43, 0.68, 0.0],
+        ankle=[0.45, 0.95, 0.0],
+        shoulder=[0.45, 0.35, 0.0],
+        right_hip=[0.55, 0.62, 0.0],
+        left_shoulder=sh_l_front,
+        right_shoulder=sh_r_front,
+        left_knee=[0.43, 0.68, 0.0],
+        right_knee=[0.57, 0.68, 0.0],
+        left_ankle=[0.45, 0.95, 0.0],
+        right_ankle=[0.55, 0.95, 0.0],
+        now=sim_t,
+    )
+    assert res_front_drop["active_profile"] == "FRONT"
+    assert res_front_drop["phase"] == "HOLDING"
+    assert res_front_drop["metric_value"] >= 28.0
+    print("Normalized Front Profile Hip Drop (>=28%) Verified!")
+
+    # 5. Test 3-Frame Valgus Persistence Filter in Front Mode
+    # Single frame valgus noise (ratio 0.04 / 0.30 = 0.13 < 0.65)
+    caved_lk, caved_rk = [0.48, 0.68, 0.0], [0.52, 0.68, 0.0]
+    caved_la, caved_ra = [0.35, 0.95, 0.0], [0.65, 0.95, 0.0]
+
+    # Frame 1: Valgus detected but not yet persisted (frame count 1 < 3)
+    sim_t += 0.1
+    f1 = engine_front.process(
+        hip=[0.45, 0.62, 0.0], knee=[0.48, 0.68, 0.0], ankle=[0.35, 0.95, 0.0],
+        right_hip=[0.55, 0.62, 0.0], left_shoulder=sh_l_front, right_shoulder=sh_r_front,
+        left_knee=caved_lk, right_knee=caved_rk, left_ankle=caved_la, right_ankle=caved_ra, now=sim_t
+    )
+    assert not f1["has_fault"]  # Ignored as potential tracking noise
+
+    # Frame 2: Still < 3
+    sim_t += 0.1
+    f2 = engine_front.process(
+        hip=[0.45, 0.62, 0.0], knee=[0.48, 0.68, 0.0], ankle=[0.35, 0.95, 0.0],
+        right_hip=[0.55, 0.62, 0.0], left_shoulder=sh_l_front, right_shoulder=sh_r_front,
+        left_knee=caved_lk, right_knee=caved_rk, left_ankle=caved_la, right_ankle=caved_ra, now=sim_t
+    )
+    assert not f2["has_fault"]
+
+    # Frame 3: 3 consecutive frames -> Confirmed Valgus!
+    sim_t += 0.1
+    f3 = engine_front.process(
+        hip=[0.45, 0.62, 0.0], knee=[0.48, 0.68, 0.0], ankle=[0.35, 0.95, 0.0],
+        right_hip=[0.55, 0.62, 0.0], left_shoulder=sh_l_front, right_shoulder=sh_r_front,
+        left_knee=caved_lk, right_knee=caved_rk, left_ankle=caved_la, right_ankle=caved_ra, now=sim_t
+    )
+    assert f3["has_fault"]
+    assert f3["fault_type"] == "valgus"
+    print("3-Frame Valgus Persistence Noise Filter Verified!")
+
+    print("\n[OK] ALL DUAL PROFILE ADAPTIVE KINEMATICS TESTS PASSED!")
+
+
 if __name__ == "__main__":
     test_phase5_multi_exercise_3d_engine()
     test_phase6_boss_combat_and_parrying()
     test_phase7_mutators_and_leaderboard()
+    test_dual_profile_adaptive_kinematics()
