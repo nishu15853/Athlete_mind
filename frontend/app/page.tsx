@@ -13,24 +13,40 @@ declare global {
   }
 }
 
+type ExerciseType = "squats" | "pushups" | "overhead_press" | "rdl";
+type DifficultyType = "rehab" | "standard" | "athlete";
+
 interface BioEnginePacket {
   event?: string;
+  exercise_type?: string;
+  difficulty?: string;
+  view_orientation?: string;
   status: string;
   phase: string;
-  knee_angle: number;
-  hip_angle: number;
+  primary_angle?: number;
+  primary_angle_name?: string;
+  secondary_angle?: number;
+  secondary_angle_name?: string;
+  knee_angle?: number;
+  hip_angle?: number;
   rep_count: number;
   hold_time?: number;
   hold_progress?: number;
+  hold_target?: number;
   damage?: number;
   damage_taken?: number;
   purity?: number;
+  has_fault?: boolean;
+  fault_type?: string;
   knee_caved_in?: boolean;
   valgus?: boolean;
   weapon_overheated?: boolean;
   error?: string;
   message: string;
+  audio_cue?: string;
   is_critical?: boolean;
+  active_joint_index?: number;
+  fault_joint_indices?: number[];
 }
 
 interface AngleSample {
@@ -40,6 +56,7 @@ interface AngleSample {
 
 interface RepDetail {
   repIndex: number;
+  exercise: string;
   minAngle: number;
   holdDuration: number;
   purityScore: number;
@@ -73,7 +90,7 @@ interface FloatingText {
 }
 
 // ---------------------------------------------------------------------------
-// Browser Audio Synthesizer (Zero External Dependencies)
+// Browser Audio Synthesizer (FX + Procedural Audio)
 // ---------------------------------------------------------------------------
 
 class AudioSynth {
@@ -100,7 +117,7 @@ class AudioSynth {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sine";
-      const baseFreq = 300 + Math.min(1.0, progress) * 480;
+      const baseFreq = 320 + Math.min(1.0, progress) * 480;
       osc.frequency.setValueAtTime(baseFreq, this.ctx.currentTime);
 
       gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
@@ -111,7 +128,7 @@ class AudioSynth {
       osc.start();
       osc.stop(this.ctx.currentTime + 0.08);
     } catch {
-      // Audio policy safe
+      // safe
     }
   }
 
@@ -122,7 +139,6 @@ class AudioSynth {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
 
-      // Heavy sub-bass punch
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sawtooth";
@@ -136,7 +152,6 @@ class AudioSynth {
       osc.start(now);
       osc.stop(now + 0.35);
 
-      // Cyber laser ping
       const ping = this.ctx.createOscillator();
       const pingGain = this.ctx.createGain();
       ping.type = "sine";
@@ -150,7 +165,7 @@ class AudioSynth {
       ping.start(now);
       ping.stop(now + 0.18);
     } catch {
-      // noop
+      // safe
     }
   }
 
@@ -174,7 +189,7 @@ class AudioSynth {
       osc.start(now);
       osc.stop(now + 0.45);
     } catch {
-      // noop
+      // safe
     }
   }
 
@@ -197,7 +212,7 @@ class AudioSynth {
       osc.start(now);
       osc.stop(now + 0.5);
     } catch {
-      // noop
+      // safe
     }
   }
 
@@ -221,7 +236,7 @@ class AudioSynth {
         osc.stop(start + 0.35);
       });
     } catch {
-      // noop
+      // safe
     }
   }
 
@@ -245,7 +260,7 @@ class AudioSynth {
         osc.stop(start + 0.3);
       });
     } catch {
-      // noop
+      // safe
     }
   }
 }
@@ -253,14 +268,27 @@ class AudioSynth {
 const synth = new AudioSynth();
 
 // ---------------------------------------------------------------------------
-// Main Component: AthleteMind Phase 4 Clinician Telemetry
+// Main Component: AthleteMind Multi-Exercise & 3D Clinician Engine
 // ---------------------------------------------------------------------------
 
-export default function Phase4ClinicianPage() {
+export default function AthleteMindPage() {
   const [scriptReady, setScriptReady] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+
+  // Exercise & Difficulty Configuration
+  const [exercise, setExercise] = useState<ExerciseType>("squats");
+  const [difficulty, setDifficulty] = useState<DifficultyType>("standard");
+  const [orientationView, setOrientationView] = useState<string>("front");
+
+  // Dynamic Joint Angle Tracking
+  const [primaryAngle, setPrimaryAngle] = useState(180);
+  const [primaryAngleName, setPrimaryAngleName] = useState("Knee");
+  const [secondaryAngle, setSecondaryAngle] = useState(180);
+  const [secondaryAngleName, setSecondaryAngleName] = useState("Hip");
+  const [activeJointIdx, setActiveJointIdx] = useState(25);
+  const [faultJointIndices, setFaultJointIndices] = useState<number[]>([]);
 
   // Combat State
   const [playerHp, setPlayerHp] = useState(100);
@@ -275,13 +303,12 @@ export default function Phase4ClinicianPage() {
   // Kinematics & Metrics
   const [repCount, setRepCount] = useState(0);
   const [formPurity, setFormPurity] = useState(100);
-  const [kneeAngle, setKneeAngle] = useState(180);
-  const [hipAngle, setHipAngle] = useState(180);
   const [holdProgress, setHoldProgress] = useState(0);
+  const [targetHoldDuration, setTargetHoldDuration] = useState(1.5);
 
   // Banner
-  const [combatBanner, setCombatBanner] = useState("WAITING");
-  const [combatBannerType, setCombatBannerType] = useState<"WAITING" | "HOLD" | "CRIT" | "EGO_LIFT" | "VALGUS">("WAITING");
+  const [combatBanner, setCombatBanner] = useState("READY • POSITION BODY");
+  const [combatBannerType, setCombatBannerType] = useState<"WAITING" | "HOLD" | "CRIT" | "EGO_LIFT" | "FAULT">("WAITING");
 
   // Game Flow & Clinician Modal
   const [matchStatus, setMatchStatus] = useState<"ACTIVE" | "VICTORY" | "DEFEAT">("ACTIVE");
@@ -293,6 +320,7 @@ export default function Phase4ClinicianPage() {
   const [repDetails, setRepDetails] = useState<RepDetail[]>([]);
   const [valgusCount, setValgusCount] = useState(0);
   const [egoLiftsCount, setEgoLiftsCount] = useState(0);
+  const [postureFaultsCount, setPostureFaultsCount] = useState(0);
   const [minSessionAngle, setMinSessionAngle] = useState(180);
   const [holdDurations, setHoldDurations] = useState<number[]>([]);
 
@@ -312,17 +340,48 @@ export default function Phase4ClinicianPage() {
   const screenShakeRef = useRef(0);
   const lastHoldTickTimeRef = useRef(0);
   const lastTraceSampleTimeRef = useRef(0);
+  const lastSpeechTimeRef = useRef(0);
 
   // Fast access mirrors
-  const kneeAngleRef = useRef(180);
+  const primaryAngleRef = useRef(180);
   const holdProgressRef = useRef(0);
   const isStunnedRef = useRef(false);
-  const isCriticalRef = useRef(false);
   const isEnragedRef = useRef(false);
+  const activeJointIdxRef = useRef(25);
+  const faultJointIndicesRef = useRef<number[]>([]);
+  const exerciseRef = useRef<ExerciseType>("squats");
+  const difficultyRef = useRef<DifficultyType>("standard");
 
   useEffect(() => {
     isEnragedRef.current = isEnraged;
   }, [isEnraged]);
+
+  useEffect(() => {
+    exerciseRef.current = exercise;
+  }, [exercise]);
+
+  useEffect(() => {
+    difficultyRef.current = difficulty;
+  }, [difficulty]);
+
+  // Real-Time Audio Biomechanical Coach (Browser SpeechSynthesis API with 3s cooldown)
+  const speakCoachCue = useCallback((cue: string) => {
+    if (!cue || synth.muted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const now = Date.now();
+    if (now - lastSpeechTimeRef.current < 3000) return; // 3-second cooldown throttle
+
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(cue);
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+      utterance.volume = 0.9;
+      window.speechSynthesis.speak(utterance);
+      lastSpeechTimeRef.current = now;
+    } catch {
+      // safe
+    }
+  }, []);
 
   const spawnParticles = useCallback((cx: number, cy: number, count = 25, color = "#00f0ff") => {
     for (let i = 0; i < count; i++) {
@@ -356,6 +415,61 @@ export default function Phase4ClinicianPage() {
     });
   }, []);
 
+  // Exercise Change Handler
+  const handleSelectExercise = (newEx: ExerciseType) => {
+    setExercise(newEx);
+    exerciseRef.current = newEx;
+    if (newEx === "pushups") {
+      setPrimaryAngleName("Elbow");
+      setSecondaryAngleName("Plank");
+      setActiveJointIdx(13);
+      activeJointIdxRef.current = 13;
+    } else if (newEx === "overhead_press") {
+      setPrimaryAngleName("Shoulder");
+      setSecondaryAngleName("Spine");
+      setActiveJointIdx(11);
+      activeJointIdxRef.current = 11;
+    } else if (newEx === "rdl") {
+      setPrimaryAngleName("Hinge");
+      setSecondaryAngleName("Knee");
+      setActiveJointIdx(23);
+      activeJointIdxRef.current = 23;
+    } else {
+      setPrimaryAngleName("Knee");
+      setSecondaryAngleName("Hip");
+      setActiveJointIdx(25);
+      activeJointIdxRef.current = 25;
+    }
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          action: "set_exercise",
+          exercise_type: newEx,
+          difficulty: difficultyRef.current,
+        })
+      );
+    }
+    speakCoachCue(`Switched to ${newEx.replace("_", " ")}`);
+  };
+
+  // Difficulty Change Handler
+  const handleSelectDifficulty = (newDiff: DifficultyType) => {
+    setDifficulty(newDiff);
+    difficultyRef.current = newDiff;
+    setTargetHoldDuration(newDiff === "rehab" ? 1.0 : newDiff === "athlete" ? 2.0 : 1.5);
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          action: "set_exercise",
+          exercise_type: exerciseRef.current,
+          difficulty: newDiff,
+        })
+      );
+    }
+    speakCoachCue(`${newDiff} mode activated`);
+  };
+
   // Reset Session
   const handleResetCombat = useCallback(() => {
     setPlayerHp(100);
@@ -365,26 +479,26 @@ export default function Phase4ClinicianPage() {
     setIsStunned(false);
     setRepCount(0);
     setFormPurity(100);
-    setKneeAngle(180);
-    setHipAngle(180);
+    setPrimaryAngle(180);
+    setSecondaryAngle(180);
     setHoldProgress(0);
     setBossAttackTimer(10.0);
-    setCombatBanner("READY • SQUAT DOWN");
+    setCombatBanner("READY • COMMENCE EXERCISE");
     setCombatBannerType("WAITING");
     setMatchStatus("ACTIVE");
     setShowClinicianModal(false);
     setBattleStartTime(Date.now());
     setValgusCount(0);
     setEgoLiftsCount(0);
+    setPostureFaultsCount(0);
     setMinSessionAngle(180);
     setAngleTrace([]);
     setRepDetails([]);
     setHoldDurations([]);
 
-    kneeAngleRef.current = 180;
+    primaryAngleRef.current = 180;
     holdProgressRef.current = 0;
     isStunnedRef.current = false;
-    isCriticalRef.current = false;
     particlesRef.current = [];
     floatingTextsRef.current = [];
 
@@ -416,15 +530,16 @@ export default function Phase4ClinicianPage() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "athletemind_clinical_telemetry.csv";
+        a.download = `athletemind_${exercise}_telemetry.csv`;
         a.click();
         window.URL.revokeObjectURL(url);
       })
       .catch(() => {
         // Fallback: Client-Side CSV generation
-        const headers = ["Rep_Index", "Min_Knee_Angle_Deg", "Hold_Duration_s", "Purity_Score_Pct", "Quality_Verdict", "Faults", "Timestamp"];
+        const headers = ["Rep_Index", "Exercise", "Min_Angle_Deg", "Hold_Duration_s", "Purity_Score_Pct", "Quality_Verdict", "Faults", "Timestamp"];
         const rows = repDetails.map((r) => [
           r.repIndex,
+          r.exercise,
           r.minAngle,
           r.holdDuration,
           r.purityScore,
@@ -436,7 +551,7 @@ export default function Phase4ClinicianPage() {
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
-        link.setAttribute("download", "athletemind_clinical_telemetry.csv");
+        link.setAttribute("download", `athletemind_${exercise}_telemetry.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -479,6 +594,7 @@ export default function Phase4ClinicianPage() {
                 setMatchStatus("DEFEAT");
                 setShowClinicianModal(true);
                 synth.playDefeat();
+                speakCoachCue("Mission failed. Retreat and recover.");
               }
               return nextHp;
             });
@@ -497,7 +613,7 @@ export default function Phase4ClinicianPage() {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [matchStatus, spawnParticles, spawnFloatingText]);
+  }, [matchStatus, spawnParticles, spawnFloatingText, speakCoachCue]);
 
   // Match completion detection
   useEffect(() => {
@@ -505,15 +621,17 @@ export default function Phase4ClinicianPage() {
       setMatchStatus("VICTORY");
       setShowClinicianModal(true);
       synth.playVictory();
+      speakCoachCue("Target destroyed! Outstanding biomechanical execution!");
     } else if (playerHp <= 0 && matchStatus === "ACTIVE") {
       setMatchStatus("DEFEAT");
       setShowClinicianModal(true);
       synth.playDefeat();
+      speakCoachCue("Mission failed. Recover and retry.");
     }
-  }, [bossHp, playerHp, matchStatus]);
+  }, [bossHp, playerHp, matchStatus, speakCoachCue]);
 
   // ---------------------------------------------------------------------------
-  // Canvas Render Loop
+  // Canvas Render Loop with Dynamic Color-Coded Kinematic Skeleton
   // ---------------------------------------------------------------------------
 
   const renderCanvasPass = useCallback(() => {
@@ -566,40 +684,40 @@ export default function Phase4ClinicianPage() {
     ctx.strokeStyle = isEnragedRef.current ? "rgba(255, 0, 85, 0.6)" : "rgba(0, 240, 255, 0.4)";
     ctx.lineWidth = 2.5;
     const bSize = 22;
-    // Top-Left
     ctx.beginPath();
     ctx.moveTo(14, 14 + bSize);
     ctx.lineTo(14, 14);
     ctx.lineTo(14 + bSize, 14);
     ctx.stroke();
-    // Top-Right
+
     ctx.beginPath();
     ctx.moveTo(width - 14 - bSize, 14);
     ctx.lineTo(width - 14, 14);
     ctx.lineTo(width - 14, 14 + bSize);
     ctx.stroke();
-    // Bottom-Left
+
     ctx.beginPath();
     ctx.moveTo(14, height - 14 - bSize);
     ctx.lineTo(14, height - 14);
     ctx.lineTo(14 + bSize, height - 14);
     ctx.stroke();
-    // Bottom-Right
+
     ctx.beginPath();
     ctx.moveTo(width - 14 - bSize, height - 14);
     ctx.lineTo(width - 14, height - 14);
     ctx.lineTo(width - 14, height - 14 - bSize);
     ctx.stroke();
 
-    // 3. Kinetic Laser Skeleton & Circular Hold Gauge
+    // 3. Dynamic Color-Coded Kinematic Skeleton
     const landmarks = landmarksRef.current;
     if (landmarks && Array.isArray(landmarks) && landmarks.length >= 29) {
       const getPt = (idx: number) => {
         const pt = landmarks[idx];
-        if (!pt || pt.visibility < 0.4) return null;
+        if (!pt || pt.visibility < 0.35) return null;
         return {
           x: (1.0 - pt.x) * width,
           y: pt.y * height,
+          idx,
         };
       };
 
@@ -616,7 +734,20 @@ export default function Phase4ClinicianPage() {
       const lAnk = getPt(27);
       const rAnk = getPt(28);
 
-      const drawBone = (p1: any, p2: any, color = "#00f0ff", lineWidth = 3.5) => {
+      const isFaultJoint = (idx1: number, idx2: number) => {
+        const faults = faultJointIndicesRef.current;
+        return faults.includes(idx1) || faults.includes(idx2);
+      };
+
+      const getBoneColor = (idx1: number, idx2: number) => {
+        if (isStunnedRef.current) return "#ff0055";
+        if (isFaultJoint(idx1, idx2)) return "#ff2a5f"; // Red / Yellow alert
+        if (holdProgressRef.current >= 1.0) return "#10b981"; // Neon Green for target met
+        if (holdProgressRef.current > 0) return "#ffd700"; // Gold holding
+        return "#00f0ff"; // Default cyan
+      };
+
+      const drawBone = (p1: any, p2: any, color: string, lineWidth = 3.5) => {
         if (!p1 || !p2) return;
         ctx.save();
         ctx.beginPath();
@@ -631,48 +762,53 @@ export default function Phase4ClinicianPage() {
         ctx.restore();
       };
 
-      const baseColor = isStunnedRef.current ? "#ff0055" : "#00f0ff";
-      const legColor = isStunnedRef.current
-        ? "#ff0055"
-        : holdProgressRef.current > 0
-        ? "#ffd700"
-        : "#00f0ff";
+      // Arms
+      drawBone(lSh, rSh, getBoneColor(11, 12), 3.5);
+      drawBone(lSh, lEl, getBoneColor(11, 13), 3.5);
+      drawBone(lEl, lWr, getBoneColor(13, 15), 3.5);
+      drawBone(rSh, rEl, getBoneColor(12, 14), 3.5);
+      drawBone(rEl, rWr, getBoneColor(14, 16), 3.5);
 
-      // Upper Body
-      drawBone(lSh, rSh, baseColor, 3.5);
-      drawBone(lSh, lEl, baseColor, 2.5);
-      drawBone(lEl, lWr, baseColor, 2.5);
-      drawBone(rSh, rEl, baseColor, 2.5);
-      drawBone(rEl, rWr, baseColor, 2.5);
-
-      // Spine
+      // Spine & Pelvis
       if (lSh && rSh && lHip && rHip) {
         const midSh = { x: (lSh.x + rSh.x) / 2, y: (lSh.y + rSh.y) / 2 };
         const midHip = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
-        drawBone(midSh, midHip, baseColor, 4.0);
-        drawBone(lHip, rHip, baseColor, 4.0);
+        drawBone(midSh, midHip, getBoneColor(11, 23), 4.0);
+        drawBone(lHip, rHip, getBoneColor(23, 24), 4.0);
       }
 
-      // Lower Chain
-      drawBone(lHip, lKnee, legColor, 4.5);
-      drawBone(lKnee, lAnk, legColor, 4.5);
-      drawBone(rHip, rKnee, legColor, 4.5);
-      drawBone(rKnee, rAnk, legColor, 4.5);
+      // Legs
+      drawBone(lHip, lKnee, getBoneColor(23, 25), 4.5);
+      drawBone(lKnee, lAnk, getBoneColor(25, 27), 4.5);
+      drawBone(rHip, rKnee, getBoneColor(24, 26), 4.5);
+      drawBone(rKnee, rAnk, getBoneColor(26, 28), 4.5);
 
       // Joint Halos
       const joints = [
-        { pt: lSh, r: 5, col: baseColor },
-        { pt: rSh, r: 5, col: baseColor },
-        { pt: lHip, r: 6, col: baseColor },
-        { pt: rHip, r: 6, col: baseColor },
-        { pt: lKnee, r: 7, col: legColor },
-        { pt: rKnee, r: 7, col: legColor },
-        { pt: lAnk, r: 5, col: baseColor },
-        { pt: rAnk, r: 5, col: baseColor },
+        { pt: lSh, idx: 11, r: 5 },
+        { pt: rSh, idx: 12, r: 5 },
+        { pt: lEl, idx: 13, r: 5 },
+        { pt: rEl, idx: 14, r: 5 },
+        { pt: lWr, idx: 15, r: 4 },
+        { pt: rWr, idx: 16, r: 4 },
+        { pt: lHip, idx: 23, r: 6 },
+        { pt: rHip, idx: 24, r: 6 },
+        { pt: lKnee, idx: 25, r: 7 },
+        { pt: rKnee, idx: 26, r: 7 },
+        { pt: lAnk, idx: 27, r: 5 },
+        { pt: rAnk, idx: 28, r: 5 },
       ];
 
-      joints.forEach(({ pt, r, col }) => {
+      joints.forEach(({ pt, idx, r }) => {
         if (!pt) return;
+        const col = isFaultJoint(idx, idx)
+          ? "#ff2a5f"
+          : idx === activeJointIdxRef.current
+          ? holdProgressRef.current >= 1.0
+            ? "#10b981"
+            : "#ffd700"
+          : "#00f0ff";
+
         ctx.save();
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
@@ -686,33 +822,35 @@ export default function Phase4ClinicianPage() {
         ctx.restore();
       });
 
-      // Clinical Hold Arc around Active Knee
-      const activeKnee = lKnee || rKnee;
-      if (activeKnee && holdProgressRef.current > 0) {
-        const radius = 32;
+      // Dynamic Circular Hold Gauge on Active Joint
+      const activeIdx = activeJointIdxRef.current;
+      const targetJoint = getPt(activeIdx) || getPt(activeIdx === 25 ? 26 : activeIdx === 13 ? 14 : activeIdx === 11 ? 12 : 24);
+
+      if (targetJoint && holdProgressRef.current > 0) {
+        const radius = 34;
         const progress = Math.min(1.0, holdProgressRef.current);
         const startAngle = -Math.PI / 2;
         const endAngle = startAngle + Math.PI * 2 * progress;
 
         ctx.save();
         ctx.beginPath();
-        ctx.arc(activeKnee.x, activeKnee.y, radius, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+        ctx.arc(targetJoint.x, targetJoint.y, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
         ctx.lineWidth = 4.5;
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.arc(activeKnee.x, activeKnee.y, radius, startAngle, endAngle);
-        ctx.strokeStyle = "#ffd700";
+        ctx.arc(targetJoint.x, targetJoint.y, radius, startAngle, endAngle);
+        ctx.strokeStyle = progress >= 1.0 ? "#10b981" : "#ffd700";
         ctx.lineWidth = 5.5;
-        ctx.shadowColor = "#ffd700";
+        ctx.shadowColor = progress >= 1.0 ? "#10b981" : "#ffd700";
         ctx.shadowBlur = 14;
         ctx.stroke();
 
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 13px monospace";
         ctx.textAlign = "center";
-        ctx.fillText(`${Math.round(kneeAngleRef.current)}°`, activeKnee.x, activeKnee.y - radius - 6);
+        ctx.fillText(`${Math.round(primaryAngleRef.current)}°`, targetJoint.x, targetJoint.y - radius - 6);
         ctx.restore();
       }
     }
@@ -769,7 +907,7 @@ export default function Phase4ClinicianPage() {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Continuous MediaPipe Pose Loop & WebSocket Connection
+  // Continuous MediaPipe Pose Loop & WebSocket Connection (Bilateral 3D Stream)
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
@@ -799,18 +937,31 @@ export default function Phase4ClinicianPage() {
         const socket = socketRef.current;
         if (socket && socket.readyState === WebSocket.OPEN) {
           const lms = results.poseLandmarks;
+          const getCoord = (idx: number) => {
+            const p = lms[idx];
+            if (!p) return [0, 0, 0, 0];
+            return [p.x, p.y, p.z || 0, p.visibility || 1];
+          };
+
+          // Bilateral 3D Coordinates Vector Payload [x, y, z, v]
           const payload = {
+            exercise_type: exerciseRef.current,
+            difficulty: difficultyRef.current,
             left: {
-              shoulder: [lms[11]?.x, lms[11]?.y, lms[11]?.z],
-              hip: [lms[23]?.x, lms[23]?.y, lms[23]?.z],
-              knee: [lms[25]?.x, lms[25]?.y, lms[25]?.z],
-              ankle: [lms[27]?.x, lms[27]?.y, lms[27]?.z],
+              shoulder: getCoord(11),
+              elbow: getCoord(13),
+              wrist: getCoord(15),
+              hip: getCoord(23),
+              knee: getCoord(25),
+              ankle: getCoord(27),
             },
             right: {
-              shoulder: [lms[12]?.x, lms[12]?.y, lms[12]?.z],
-              hip: [lms[24]?.x, lms[24]?.y, lms[24]?.z],
-              knee: [lms[26]?.x, lms[26]?.y, lms[26]?.z],
-              ankle: [lms[28]?.x, lms[28]?.y, lms[28]?.z],
+              shoulder: getCoord(12),
+              elbow: getCoord(14),
+              wrist: getCoord(16),
+              hip: getCoord(24),
+              knee: getCoord(26),
+              ankle: getCoord(28),
             },
           };
           socket.send(JSON.stringify(payload));
@@ -824,8 +975,16 @@ export default function Phase4ClinicianPage() {
 
     socket.onopen = () => {
       setWsConnected(true);
-      setCombatBanner("READY • SQUAT DOWN");
+      setCombatBanner("READY • POSITION BODY");
       setCombatBannerType("WAITING");
+      // Synchronize chosen exercise and difficulty on connect
+      socket.send(
+        JSON.stringify({
+          action: "set_exercise",
+          exercise_type: exerciseRef.current,
+          difficulty: difficultyRef.current,
+        })
+      );
     };
 
     socket.onclose = () => {
@@ -842,26 +1001,47 @@ export default function Phase4ClinicianPage() {
       try {
         const data: BioEnginePacket = JSON.parse(event.data);
 
-        // Update Kinematics
-        if (data.knee_angle !== undefined) {
-          setKneeAngle(Math.round(data.knee_angle));
-          kneeAngleRef.current = data.knee_angle;
+        // Update Orientation
+        if (data.view_orientation) {
+          setOrientationView(data.view_orientation);
+        }
 
-          if (data.knee_angle < minSessionAngle) {
-            setMinSessionAngle(Math.round(data.knee_angle));
+        // Update Dynamic Angle Labels
+        if (data.primary_angle_name) setPrimaryAngleName(data.primary_angle_name);
+        if (data.secondary_angle_name) setSecondaryAngleName(data.secondary_angle_name);
+
+        if (data.active_joint_index !== undefined) {
+          setActiveJointIdx(data.active_joint_index);
+          activeJointIdxRef.current = data.active_joint_index;
+        }
+
+        if (data.fault_joint_indices) {
+          setFaultJointIndices(data.fault_joint_indices);
+          faultJointIndicesRef.current = data.fault_joint_indices;
+        }
+
+        // Update Kinematics
+        const currentPriAngle = data.primary_angle !== undefined ? data.primary_angle : data.knee_angle;
+        if (currentPriAngle !== undefined) {
+          setPrimaryAngle(Math.round(currentPriAngle));
+          primaryAngleRef.current = currentPriAngle;
+
+          if (currentPriAngle < minSessionAngle) {
+            setMinSessionAngle(Math.round(currentPriAngle));
           }
 
-          // Sample 10Hz angle trace for clinician sparkline
+          // 10Hz sparkline angle trace
           const nowMs = Date.now();
           if (nowMs - lastTraceSampleTimeRef.current >= 100) {
             const elapsedSec = (nowMs - battleStartTime) / 1000;
-            setAngleTrace((prev) => [...prev.slice(-150), { timestamp: Number(elapsedSec.toFixed(1)), angle: data.knee_angle }]);
+            setAngleTrace((prev) => [...prev.slice(-150), { timestamp: Number(elapsedSec.toFixed(1)), angle: currentPriAngle }]);
             lastTraceSampleTimeRef.current = nowMs;
           }
         }
 
-        if (data.hip_angle !== undefined) {
-          setHipAngle(Math.round(data.hip_angle));
+        const currentSecAngle = data.secondary_angle !== undefined ? data.secondary_angle : data.hip_angle;
+        if (currentSecAngle !== undefined) {
+          setSecondaryAngle(Math.round(currentSecAngle));
         }
 
         if (data.rep_count !== undefined) {
@@ -870,6 +1050,11 @@ export default function Phase4ClinicianPage() {
 
         if (data.purity !== undefined) {
           setFormPurity(Math.round(data.purity));
+        }
+
+        // Audio Biomechanical Coach Cue
+        if (data.audio_cue) {
+          speakCoachCue(data.audio_cue);
         }
 
         // Handle Hold Progress & Audio Tick
@@ -887,14 +1072,13 @@ export default function Phase4ClinicianPage() {
           }
         }
 
-        // Handle Ego Lift Penalty (-25 HP & Overheat 100%)
+        // Handle Stun & Fault Events
         if (data.status === "penalty" || data.phase === "STUNNED" || (data.damage_taken && data.damage_taken > 0)) {
           setIsStunned(true);
           isStunnedRef.current = true;
-          isCriticalRef.current = false;
           setOverheatMeter(100);
           setStunTimer(3.0);
-          setCombatBanner("EGO LIFT DETECTED - STUNNED!");
+          setCombatBanner(data.message || "FORM PENALTY - STUNNED!");
           setCombatBannerType("EGO_LIFT");
           setEgoLiftsCount((c) => c + 1);
 
@@ -910,8 +1094,7 @@ export default function Phase4ClinicianPage() {
         } else if (data.status === "hit" || data.event === "HOLD_HIT" || data.event === "REP_COMPLETE") {
           setIsStunned(false);
           isStunnedRef.current = false;
-          isCriticalRef.current = true;
-          setCombatBanner("CRITICAL HIT!");
+          setCombatBanner(data.message || "CRITICAL HIT!");
           setCombatBannerType("CRIT");
 
           if (data.damage && data.damage > 0) {
@@ -928,17 +1111,18 @@ export default function Phase4ClinicianPage() {
           }
 
           if (data.event === "REP_COMPLETE") {
-            const holdDur = Math.max(1.5, data.hold_time || 1.5);
+            const holdDur = Math.max(1.0, data.hold_time || 1.5);
             setHoldDurations((prev) => [...prev, holdDur]);
             setRepDetails((prev) => [
               ...prev,
               {
                 repIndex: data.rep_count,
-                minAngle: Math.round(data.knee_angle),
+                exercise: exerciseRef.current,
+                minAngle: Math.round(currentPriAngle || 90),
                 holdDuration: holdDur,
                 purityScore: data.purity || 100,
-                verdict: data.valgus ? "VALGUS_FAULT" : "OPTIMAL",
-                faults: data.valgus ? "KNEE_VALGUS" : "NONE",
+                verdict: data.has_fault ? (data.fault_type?.toUpperCase() || "FAULT") : "OPTIMAL",
+                faults: data.fault_type || "NONE",
                 timestamp: new Date().toLocaleTimeString(),
               },
             ]);
@@ -946,20 +1130,19 @@ export default function Phase4ClinicianPage() {
         } else if (data.phase === "HOLDING") {
           setIsStunned(false);
           isStunnedRef.current = false;
-          isCriticalRef.current = false;
-          setCombatBanner(`HOLD SQUAT... (${(data.hold_time || 0).toFixed(1)}s / 1.5s)`);
+          setCombatBanner(`HOLD POSITION... (${(data.hold_time || 0).toFixed(1)}s / ${(data.hold_target || 1.5)}s)`);
           setCombatBannerType("HOLD");
-        } else if (data.knee_caved_in || data.valgus) {
+        } else if (data.has_fault) {
           setIsStunned(false);
           isStunnedRef.current = false;
-          setCombatBanner("KNEES CAVING INWARD - DRIVE KNEES OUT");
-          setCombatBannerType("VALGUS");
-          setValgusCount((v) => v + 1);
+          setCombatBanner(data.message);
+          setCombatBannerType("FAULT");
+          if (data.fault_type === "valgus") setValgusCount((v) => v + 1);
+          else setPostureFaultsCount((p) => p + 1);
         } else {
           setIsStunned(false);
           isStunnedRef.current = false;
-          isCriticalRef.current = false;
-          setCombatBanner(data.message || "READY • SQUAT DOWN");
+          setCombatBanner(data.message || "READY • COMMENCE EXERCISE");
           setCombatBannerType("WAITING");
         }
       } catch (err) {
@@ -1036,32 +1219,46 @@ export default function Phase4ClinicianPage() {
       try {
         pose.close();
       } catch {
-        // noop
+        // safe
       }
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
         socket.close();
       }
     };
-  }, [scriptReady, renderCanvasPass, spawnParticles, spawnFloatingText, battleStartTime, minSessionAngle]);
+  }, [scriptReady, renderCanvasPass, spawnParticles, spawnFloatingText, battleStartTime, minSessionAngle, speakCoachCue]);
 
   const purityColor = formPurity >= 90 ? "text-emerald-400" : formPurity >= 70 ? "text-amber-400" : "text-rose-500";
   const durationSeconds = Math.round((Date.now() - battleStartTime) / 1000);
   const avgHoldDuration = holdDurations.length > 0
     ? Number((holdDurations.reduce((a, b) => a + b, 0) / holdDurations.length).toFixed(2))
-    : 1.5;
+    : targetHoldDuration;
 
   // Rules-Based Clinical Recommendation Generator
   const getClinicalRecommendation = () => {
-    if (valgusCount > 2) {
-      return "Target hip abductors & gluteus medius to eliminate medial knee collapse. Recommended intervention: banded clamshells and lateral monster walks.";
+    if (exercise === "squats") {
+      if (valgusCount > 2) {
+        return "Medial knee collapse (valgus) detected: recommend gluteus medius conditioning, banded abduction squats, and clamshells.";
+      }
+      if (minSessionAngle > 100) {
+        return "Limited squat depth: focus on ankle dorsiflexion and adductor mobility to achieve parallel depth.";
+      }
+      return "Symmetric lower extremity kinematics: bilateral joint flexion displays steady eccentric control.";
+    } else if (exercise === "pushups") {
+      if (postureFaultsCount > 2) {
+        return "Core/lumbar sagging detected during push-ups: strengthen anterior core via RKC planks and hollow body holds.";
+      }
+      return "Optimal sagittal push-up mechanics: scapular protraction and lumbar neutral maintained.";
+    } else if (exercise === "overhead_press") {
+      if (postureFaultsCount > 2) {
+        return "Lumbar hyperextension compensation observed: engage rectus abdominis and improve thoracic extension.";
+      }
+      return "True vertical pressing plane: scapular upward rotation and spinal bracing meet athletic standards.";
+    } else {
+      if (postureFaultsCount > 2) {
+        return "Squatting the hinge detected: maintain soft knee flexion while emphasizing posterior hip drive and hamstring recruitment.";
+      }
+      return "Pure hip hinge mechanics: posterior chain load transfer and spinal neutrality verified.";
     }
-    if (egoLiftsCount > 0) {
-      return "Pacing violation: reduce repetition cadence to prevent compensatory bouncing and lumbar spine hyperextension.";
-    }
-    if (minSessionAngle > 95) {
-      return "Limited squat depth: focus on ankle dorsiflexion and hip adductor mobility to achieve parallel (< 90°) depth.";
-    }
-    return "Optimal joint kinematics detected: bilateral knee and hip trajectories show clinical symmetry and sustained eccentric control.";
   };
 
   return (
@@ -1077,10 +1274,10 @@ export default function Phase4ClinicianPage() {
       {/* ------------------------------------------------------------------- */}
       {/* 1. TOP BAR: DUAL COMBAT HUD & CLINICIAN SHORTCUT                   */}
       {/* ------------------------------------------------------------------- */}
-      <header className="relative z-20 flex items-center justify-between px-6 py-3 bg-[#0a0f1d]/95 border-b border-cyan-500/20 backdrop-blur-md">
-        {/* Left: Player HP & Overheat */}
-        <div className="flex items-center gap-4 w-76">
-          <div className="w-11 h-11 rounded-2xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 text-xl shadow-[0_0_15px_rgba(6,182,212,0.3)]">
+      <header className="relative z-20 flex items-center justify-between px-6 py-2.5 bg-[#0a0f1d]/95 border-b border-cyan-500/20 backdrop-blur-md">
+        {/* Left: Pilot HP & Overheat */}
+        <div className="flex items-center gap-3.5 w-72">
+          <div className="w-10 h-10 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 text-lg shadow-[0_0_12px_rgba(6,182,212,0.3)]">
             🛡️
           </div>
           <div className="flex-1">
@@ -1088,7 +1285,7 @@ export default function Phase4ClinicianPage() {
               <span>PILOT HP</span>
               <span>{playerHp} / 100</span>
             </div>
-            <div className="h-3 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-cyan-500/30 mb-1">
+            <div className="h-2.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-cyan-500/30 mb-1">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   playerHp > 40
@@ -1098,7 +1295,7 @@ export default function Phase4ClinicianPage() {
                 style={{ width: `${Math.max(0, Math.min(100, playerHp))}%` }}
               />
             </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-400">
+            <div className="flex items-center justify-between text-[9px] text-slate-400">
               <span>OVERHEAT</span>
               <span>{stunTimer > 0 ? `STUNNED (${stunTimer.toFixed(1)}s)` : `${Math.round(overheatMeter)}%`}</span>
             </div>
@@ -1106,38 +1303,40 @@ export default function Phase4ClinicianPage() {
         </div>
 
         {/* Center: Live Telemetry */}
-        <div className="flex items-center gap-5">
-          <div className="text-center px-4 py-1 rounded-xl bg-black/60 border border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
-            <div className="text-[10px] text-cyan-400 font-semibold tracking-widest uppercase">Reps</div>
-            <div className="text-3xl font-black text-cyan-300 font-mono tracking-tight">
+        <div className="flex items-center gap-3.5">
+          <div className="text-center px-3.5 py-1 rounded-xl bg-black/60 border border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
+            <div className="text-[9px] text-cyan-400 font-semibold tracking-widest uppercase">Reps</div>
+            <div className="text-2xl font-black text-cyan-300 font-mono tracking-tight">
               {repCount.toString().padStart(2, "0")}
             </div>
           </div>
 
-          <div className="text-center px-4 py-1 rounded-xl bg-black/60 border border-cyan-500/30">
-            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Purity</div>
-            <div className={`text-2xl font-black ${purityColor} tracking-tight`}>
+          <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-cyan-500/30">
+            <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">Purity</div>
+            <div className={`text-xl font-black ${purityColor} tracking-tight`}>
               {formPurity}%
             </div>
           </div>
 
-          <div className="text-center px-3.5 py-1 rounded-xl bg-black/60 border border-slate-700/50">
-            <div className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Knee/Hip</div>
-            <div className="text-base font-bold text-slate-200 tracking-tight font-mono">
-              {kneeAngle}° / {hipAngle}°
+          <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-slate-700/50">
+            <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">
+              {primaryAngleName} / {secondaryAngleName}
+            </div>
+            <div className="text-sm font-bold text-slate-200 tracking-tight font-mono">
+              {primaryAngle}° / {secondaryAngle}°
             </div>
           </div>
 
-          <div className="text-center px-3.5 py-1 rounded-xl bg-black/60 border border-rose-500/40">
-            <div className="text-[10px] text-rose-400 font-semibold tracking-widest uppercase">Boss Attack</div>
-            <div className={`text-lg font-black font-mono tracking-tight ${bossAttackTimer <= 3.0 ? "text-rose-400 animate-ping" : "text-amber-300"}`}>
+          <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-rose-500/40">
+            <div className="text-[9px] text-rose-400 font-semibold tracking-widest uppercase">Boss Attack</div>
+            <div className={`text-base font-black font-mono tracking-tight ${bossAttackTimer <= 3.0 ? "text-rose-400 animate-ping" : "text-amber-300"}`}>
               {bossAttackTimer.toFixed(1)}s
             </div>
           </div>
         </div>
 
         {/* Right: Boss HP & Clinician Button */}
-        <div className="flex items-center gap-4 w-88 justify-end">
+        <div className="flex items-center gap-3.5 w-80 justify-end">
           <div className="flex-1 text-right">
             <div className="flex justify-between text-xs font-bold tracking-wider mb-1">
               <span className={isEnraged ? "text-rose-500 animate-pulse font-black" : "text-violet-400"}>
@@ -1145,7 +1344,7 @@ export default function Phase4ClinicianPage() {
               </span>
               <span className="text-rose-300">{bossHp} / 500</span>
             </div>
-            <div className="h-3 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-rose-500/40 mb-1">
+            <div className="h-2.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-rose-500/40 mb-1">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   isEnraged
@@ -1159,19 +1358,108 @@ export default function Phase4ClinicianPage() {
 
           <button
             onClick={() => setShowClinicianModal(true)}
-            className="px-3 py-2 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/40 text-xs font-bold text-emerald-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1.5"
+            className="px-3 py-1.5 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/40 text-xs font-bold text-emerald-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1.5"
             title="Open Clinician Debrief"
           >
-            <span>📊 CLINICIAN</span>
+            <span>📊 DEBRIEF</span>
           </button>
         </div>
       </header>
 
       {/* ------------------------------------------------------------------- */}
-      {/* 2. MAIN ARENA VIEWPORT                                              */}
+      {/* 2. SECONDARY CONTROLS BAR: EXERCISE & DIFFICULTY SELECTORS          */}
       {/* ------------------------------------------------------------------- */}
-      <main className="relative flex-1 w-full h-full flex items-center justify-center p-4 bg-gradient-to-b from-[#050811] via-[#080d1a] to-[#04060d]">
-        <div className="relative w-full max-w-5xl aspect-[4/3] max-h-[80vh] rounded-3xl overflow-hidden border-2 border-cyan-500/30 shadow-[0_0_50px_rgba(0,240,255,0.12)] bg-black">
+      <div className="relative z-10 flex flex-wrap items-center justify-between px-6 py-2 bg-[#060a14]/90 border-b border-slate-800 text-xs">
+        {/* Exercise Carousel / Pill Selector */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Movement:</span>
+          <div className="flex items-center bg-black/60 rounded-xl p-0.5 border border-slate-800">
+            <button
+              onClick={() => handleSelectExercise("squats")}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                exercise === "squats"
+                  ? "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              🏋️ SQUAT
+            </button>
+            <button
+              onClick={() => handleSelectExercise("pushups")}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                exercise === "pushups"
+                  ? "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              💪 PUSH-UP
+            </button>
+            <button
+              onClick={() => handleSelectExercise("overhead_press")}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                exercise === "overhead_press"
+                  ? "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              ⚡ OVERHEAD PRESS
+            </button>
+            <button
+              onClick={() => handleSelectExercise("rdl")}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                exercise === "rdl"
+                  ? "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              🎯 RDL HINGE
+            </button>
+          </div>
+        </div>
+
+        {/* Difficulty Modifiers */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Mobility Tier:</span>
+          <div className="flex items-center bg-black/60 rounded-xl p-0.5 border border-slate-800">
+            <button
+              onClick={() => handleSelectDifficulty("rehab")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                difficulty === "rehab"
+                  ? "bg-emerald-500 text-black shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                  : "text-emerald-400/70 hover:text-emerald-300"
+              }`}
+            >
+              🟢 REHAB (1.0s)
+            </button>
+            <button
+              onClick={() => handleSelectDifficulty("standard")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                difficulty === "standard"
+                  ? "bg-blue-500 text-black shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+                  : "text-blue-400/70 hover:text-blue-300"
+              }`}
+            >
+              🔵 STANDARD (1.5s)
+            </button>
+            <button
+              onClick={() => handleSelectDifficulty("athlete")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                difficulty === "athlete"
+                  ? "bg-purple-500 text-black shadow-[0_0_10px_rgba(168,85,247,0.5)]"
+                  : "text-purple-400/70 hover:text-purple-300"
+              }`}
+            >
+              🟣 ATHLETE (2.0s)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ------------------------------------------------------------------- */}
+      {/* 3. MAIN ARENA VIEWPORT                                              */}
+      {/* ------------------------------------------------------------------- */}
+      <main className="relative flex-1 w-full h-full flex items-center justify-center p-3 sm:p-4 bg-gradient-to-b from-[#050811] via-[#080d1a] to-[#04060d]">
+        <div className="relative w-full max-w-5xl aspect-[4/3] max-h-[78vh] rounded-3xl overflow-hidden border-2 border-cyan-500/30 shadow-[0_0_50px_rgba(0,240,255,0.12)] bg-black">
           <canvas
             ref={canvasRef}
             width={640}
@@ -1180,16 +1468,16 @@ export default function Phase4ClinicianPage() {
           />
 
           {/* Center Feedback Banner */}
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">
+          <div className="absolute top-5 left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">
             <div
-              className={`px-8 py-3 rounded-2xl border-2 backdrop-blur-md transition-all duration-200 uppercase font-black tracking-widest text-sm sm:text-base flex items-center gap-3 shadow-2xl ${
+              className={`px-7 py-2.5 rounded-2xl border-2 backdrop-blur-md transition-all duration-200 uppercase font-black tracking-widest text-xs sm:text-sm flex items-center gap-2.5 shadow-2xl ${
                 combatBannerType === "EGO_LIFT"
                   ? "bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_35px_rgba(244,63,94,0.7)] animate-bounce"
                   : combatBannerType === "CRIT"
                   ? "bg-emerald-950/90 border-emerald-400 text-emerald-200 shadow-[0_0_35px_rgba(52,211,153,0.7)] scale-105"
                   : combatBannerType === "HOLD"
                   ? "bg-cyan-950/90 border-cyan-400 text-cyan-200 shadow-[0_0_25px_rgba(6,182,212,0.5)]"
-                  : combatBannerType === "VALGUS"
+                  : combatBannerType === "FAULT"
                   ? "bg-amber-950/90 border-amber-500 text-amber-200 shadow-[0_0_25px_rgba(245,158,11,0.5)]"
                   : "bg-slate-900/80 border-slate-700 text-slate-300 shadow-lg"
               }`}
@@ -1201,7 +1489,7 @@ export default function Phase4ClinicianPage() {
                   ? "💥"
                   : combatBannerType === "HOLD"
                   ? "⏱️"
-                  : combatBannerType === "VALGUS"
+                  : combatBannerType === "FAULT"
                   ? "⚡"
                   : "🎯"}
               </span>
@@ -1209,7 +1497,7 @@ export default function Phase4ClinicianPage() {
             </div>
 
             {holdProgress > 0 && (
-              <div className="w-64 mx-auto mt-2 h-2 bg-slate-900/90 rounded-full overflow-hidden border border-cyan-400/40 p-0.5">
+              <div className="w-60 mx-auto mt-2 h-2 bg-slate-900/90 rounded-full overflow-hidden border border-cyan-400/40 p-0.5">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-amber-300 transition-all duration-75 shadow-[0_0_10px_rgba(251,191,36,0.8)]"
                   style={{ width: `${Math.min(100, holdProgress * 100)}%` }}
@@ -1218,13 +1506,16 @@ export default function Phase4ClinicianPage() {
             )}
           </div>
 
-          <div className="absolute bottom-4 left-6 z-20 flex items-center gap-3 text-xs text-slate-400">
+          <div className="absolute bottom-4 left-6 z-20 flex items-center gap-2 text-xs text-slate-400">
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 border border-slate-700">
               <span className={`w-2 h-2 rounded-full ${cameraActive ? "bg-emerald-400" : "bg-amber-400"}`} />
-              <span>{cameraActive ? "OPTICAL SENSOR ACTIVE" : "CONNECTING CAMERA..."}</span>
+              <span>{cameraActive ? "3D SENSOR ACTIVE" : "INITIALIZING CAMERA..."}</span>
             </div>
-            <div className="px-3 py-1 rounded-full bg-black/60 border border-slate-700 text-cyan-300">
-              CLINICAL HOLD: 1.5s
+            <div className="px-2.5 py-1 rounded-full bg-black/60 border border-slate-700 text-cyan-300 text-[11px]">
+              VIEW: {orientationView.toUpperCase()}
+            </div>
+            <div className="px-2.5 py-1 rounded-full bg-black/60 border border-slate-700 text-amber-300 text-[11px]">
+              HOLD: {targetHoldDuration.toFixed(1)}s
             </div>
           </div>
 
@@ -1233,7 +1524,7 @@ export default function Phase4ClinicianPage() {
               onClick={handleToggleMute}
               className="px-3 py-1.5 rounded-xl bg-black/60 hover:bg-black/90 border border-slate-700 hover:border-cyan-400 text-xs text-slate-300 transition-all cursor-pointer flex items-center gap-1.5"
             >
-              <span>{isMuted ? "🔇 MUTED" : "🔊 AUDIO"}</span>
+              <span>{isMuted ? "🔇 MUTED" : "🔊 COACH AUDIO"}</span>
             </button>
             <button
               onClick={handleResetCombat}
@@ -1246,7 +1537,7 @@ export default function Phase4ClinicianPage() {
       </main>
 
       {/* ------------------------------------------------------------------- */}
-      {/* 3. PHASE 4 CLINICIAN MODE / POST-MISSION DEBRIEF MODAL              */}
+      {/* 4. PHASE 5 CLINICIAN MODE / POST-MISSION DEBRIEF MODAL              */}
       {/* ------------------------------------------------------------------- */}
       {showClinicianModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
@@ -1259,14 +1550,10 @@ export default function Phase4ClinicianPage() {
                 </div>
                 <div>
                   <h2 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-cyan-300">
-                    {matchStatus === "VICTORY"
-                      ? "TARGET DESTROYED • CLINICIAN DEBRIEF"
-                      : matchStatus === "DEFEAT"
-                      ? "MISSION FAILED • CLINICAL KINEMATIC DEBRIEF"
-                      : "CLINICIAN TELEMETRY OVERVIEW"}
+                    {exercise.toUpperCase()} TELEMETRY • {matchStatus === "VICTORY" ? "MISSION ACCOMPLISHED" : matchStatus === "DEFEAT" ? "MISSION FAILED" : "CLINICAL DEBRIEF"}
                   </h2>
                   <p className="text-xs text-slate-400 uppercase tracking-widest">
-                    Real-Time 3D Biomechanical Range of Motion & Stability Report
+                    True 3D Vector Biomechanics & Kinematic Stability Report ({difficulty.toUpperCase()} MODE)
                   </p>
                 </div>
               </div>
@@ -1293,13 +1580,13 @@ export default function Phase4ClinicianPage() {
                 <span className="text-2xl font-black text-amber-300 font-mono">{avgHoldDuration}s</span>
               </div>
               <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center text-center">
-                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Valgus Faults</span>
-                <span className={`text-2xl font-black font-mono ${valgusCount === 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                  {valgusCount}
+                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Form Deviations</span>
+                <span className={`text-2xl font-black font-mono ${valgusCount + postureFaultsCount === 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  {valgusCount + postureFaultsCount}
                 </span>
               </div>
               <div className="p-3.5 rounded-2xl bg-black/50 border border-slate-800 flex flex-col items-center text-center col-span-2 sm:col-span-1">
-                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Max Squat Depth</span>
+                <span className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Max Joint ROM</span>
                 <span className="text-2xl font-black text-emerald-400 font-mono">
                   {minSessionAngle < 180 ? `${minSessionAngle}°` : "90°"}
                 </span>
@@ -1310,24 +1597,28 @@ export default function Phase4ClinicianPage() {
             <div className="p-4 rounded-2xl bg-black/60 border border-slate-800 flex flex-col gap-2">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="font-bold text-slate-300 uppercase tracking-wider">
-                  📈 Visual Kinematic Trace (Knee Angle Over Time)
+                  📈 Visual 3D Kinematic Trace ({primaryAngleName} Angle Over Time)
                 </span>
                 <span className="text-[11px] text-emerald-400">
-                  Green Band = Clinical Depth (&lt; 90°) • Top Line = Standing (160°)
+                  Green Band = Target Threshold • Top Line = Baseline Lockout
                 </span>
               </div>
 
               {/* SVG Sparkline */}
               <div className="relative w-full h-44 bg-[#080d1a] rounded-xl overflow-hidden border border-slate-800 p-2">
                 <svg className="w-full h-full" viewBox="0 0 600 160" preserveAspectRatio="none">
-                  {/* Critical Depth Green Threshold Band (< 90 degrees) */}
+                  {/* Depth Target Threshold Band */}
                   <rect x="0" y="80" width="600" height="80" fill="rgba(16, 185, 129, 0.12)" />
                   <line x1="0" y1="80" x2="600" y2="80" stroke="#10b981" strokeWidth="1.5" strokeDasharray="4 4" />
-                  <text x="8" y="74" fill="#10b981" fontSize="10" fontFamily="monospace">90° CLINICAL DEPTH TARGET</text>
+                  <text x="8" y="74" fill="#10b981" fontSize="10" fontFamily="monospace">
+                    CLINICAL TARGET ({exercise === "overhead_press" ? "165° TOP" : "90° BOTTOM"})
+                  </text>
 
-                  {/* Standing Baseline (160 degrees) */}
+                  {/* Standing / Lockout Baseline */}
                   <line x1="0" y1="20" x2="600" y2="20" stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
-                  <text x="8" y="16" fill="#64748b" fontSize="10" fontFamily="monospace">160° STANDING UPRIGHT</text>
+                  <text x="8" y="16" fill="#64748b" fontSize="10" fontFamily="monospace">
+                    STARTING BASELINE
+                  </text>
 
                   {/* Kinematic Angle Polyline */}
                   {angleTrace.length >= 2 ? (
@@ -1340,7 +1631,6 @@ export default function Phase4ClinicianPage() {
                       points={angleTrace
                         .map((pt, idx) => {
                           const x = (idx / (angleTrace.length - 1)) * 600;
-                          // Map angle: 180° -> y=10, 60° -> y=140
                           const norm = Math.max(0, Math.min(1, (180 - pt.angle) / 120));
                           const y = 10 + norm * 130;
                           return `${x},${y}`;
@@ -1349,7 +1639,7 @@ export default function Phase4ClinicianPage() {
                     />
                   ) : (
                     <text x="300" y="90" fill="#64748b" fontSize="12" fontFamily="monospace" textAnchor="middle">
-                      Awaiting live kinematic repetitions data...
+                      Awaiting live kinematic telemetry data...
                     </text>
                   )}
                 </svg>
@@ -1375,7 +1665,7 @@ export default function Phase4ClinicianPage() {
                 onClick={handleDownloadCsv}
                 className="flex-1 py-3 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-cyan-400 text-slate-200 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
               >
-                <span>📥 DOWNLOAD CLINICAL TELEMETRY (CSV)</span>
+                <span>📥 DOWNLOAD TELEMETRY (CSV)</span>
               </button>
               <button
                 onClick={handleResetCombat}
