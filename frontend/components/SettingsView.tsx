@@ -8,6 +8,8 @@ interface SettingsViewProps {
   isMuted: boolean;
   isRestDay: boolean;
   energyCores: number;
+  flexibilityTolerance?: number;
+  onSelectFlexibilityTolerance?: (val: number) => void;
   onToggleMute: () => void;
   onToggleRestDay: () => void;
   onSelectSoundpack: (sp: "arcade_synth" | "heavy_mecha") => void;
@@ -22,6 +24,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isMuted,
   isRestDay,
   energyCores,
+  flexibilityTolerance = 20,
+  onSelectFlexibilityTolerance,
   onToggleMute,
   onToggleRestDay,
   onSelectSoundpack,
@@ -239,6 +243,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <span>{isRestDay ? "🌿 ACTIVE" : "OFF"}</span>
           </button>
         </div>
+
+        {/* Section: Biomechanical Flexibility Range Tolerance */}
+        {onSelectFlexibilityTolerance && (
+          <div className="p-6 rounded-3xl bg-slate-950/80 border border-slate-800 backdrop-blur-md shadow-xl flex flex-col gap-4">
+            <div>
+              <h2 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
+                <span>🎯</span>
+                <span>BIOMECHANICAL FLEXIBILITY RANGE TOLERANCE</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5 max-w-xl">
+                Adjusts target joint ROM thresholds to match your personal mobility. Higher tolerance allows shallower flexion for rehabilitation.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { pct: 10, label: "STRICT (10%)", desc: "90° Deep Parallel Depth" },
+                { pct: 20, label: "STANDARD (20%)", desc: "~105° Functional Depth" },
+                { pct: 30, label: "REHAB (30%)", desc: "~118° Mobility Leniency" },
+                { pct: 40, label: "ASSISTED (40%)", desc: "~128° Gentle Recovery" },
+              ].map(({ pct, label, desc }) => (
+                <button
+                  key={pct}
+                  onClick={() => onSelectFlexibilityTolerance(pct)}
+                  className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col gap-1 ${
+                    flexibilityTolerance === pct
+                      ? "bg-cyan-950/70 border-cyan-400 shadow-[0_0_20px_rgba(0,240,255,0.3)]"
+                      : "bg-black/50 border-slate-800 hover:border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-white">{label}</span>
+                    {flexibilityTolerance === pct && (
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400">{desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Section 4: Data Management & Reset */}
         <div className="p-6 rounded-3xl bg-rose-950/20 border border-rose-500/30 backdrop-blur-md shadow-xl flex items-center justify-between">

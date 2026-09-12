@@ -10,6 +10,9 @@ interface FuturisticCockpitFrameProps {
   exerciseName: string;
   torsoTilt?: number;
   isShieldActive?: boolean;
+  repCycleStatus?: "STAND_READY" | "HOLDING" | "STAND_UP_TO_RECHARGE";
+  flexibilityTolerance?: number; // 10, 20, 30, 40
+  onFlexibilityChange?: (val: number) => void;
   children: React.ReactNode;
   leftPanel?: React.ReactNode;
   rightPanel?: React.ReactNode;
@@ -24,6 +27,9 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
   exerciseName,
   torsoTilt = 0,
   isShieldActive = false,
+  repCycleStatus = "STAND_READY",
+  flexibilityTolerance = 20,
+  onFlexibilityChange,
   children,
   leftPanel,
   rightPanel,
@@ -31,12 +37,7 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
 }) => {
   // Angle needle rotation (0 to 180 deg mapped to -120deg to +120deg)
   const clampedAngle = Math.max(0, Math.min(180, currentAngle || 0));
-  const needleDeg = ((clampedAngle / 180) * 240) - 120;
-
-  // Purity arc calculation
   const purityPct = Math.max(0, Math.min(100, formPurity || 0));
-  const purityCircumference = 2 * Math.PI * 36;
-  const purityStrokeDashoffset = purityCircumference - (purityPct / 100) * (purityCircumference * 0.75);
 
   return (
     <div
@@ -45,20 +46,40 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
       {/* ------------------------------------------------------------------- */}
       {/* 1. TOP COCKPIT COMMAND BAR & ARTIFICIAL HORIZON GYRO                */}
       {/* ------------------------------------------------------------------- */}
-      <div className="relative z-30 w-full bg-slate-950/90 border-b border-cyan-500/40 px-4 py-2 flex items-center justify-between text-xs backdrop-blur-md">
+      <div className="relative z-30 w-full bg-slate-950/90 border-b border-cyan-500/40 px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between text-xs backdrop-blur-md gap-2">
         {/* Left Sensor Status */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-cyan-950/70 border border-cyan-500/50 text-[10px] text-cyan-300 font-bold">
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-            <span>SENSOR FEED // 60 FPS</span>
+            <span>SENSOR // 60 FPS</span>
           </div>
-          <span className="text-[10px] text-slate-400 hidden sm:inline">
-            HUD: COMBAT OPTICS 2.0
-          </span>
+
+          {/* Difficulty / Flexibility Range Tolerance Selector */}
+          {onFlexibilityChange && (
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900/90 border border-cyan-500/30">
+              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider hidden md:inline">
+                FLEX:
+              </span>
+              {[10, 20, 30, 40].map((pct) => (
+                <button
+                  key={pct}
+                  onClick={() => onFlexibilityChange(pct)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono transition-all cursor-pointer ${
+                    flexibilityTolerance === pct
+                      ? "bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(0,240,255,0.8)]"
+                      : "bg-slate-800/80 text-slate-300 hover:text-cyan-300 hover:bg-slate-700"
+                  }`}
+                  title={`Set Mobility / Flexibility Range Tolerance to ${pct}% (Target: ~${Math.round(90 + (pct / 100) * 80)}°)`}
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Center: Artificial Horizon & Gyroscope Reticle */}
-        <div className="flex items-center gap-3">
+        <div className="hidden sm:flex items-center gap-3">
           <div className="relative w-28 h-6 flex items-center justify-center overflow-hidden border border-slate-700/60 rounded bg-black/60 px-2">
             {/* Horizon pitch line tilting with user torso */}
             <div
@@ -73,15 +94,28 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
           </div>
         </div>
 
-        {/* Right Tactical Telemetry */}
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] text-slate-300 hidden md:inline">
+        {/* Right Tactical Telemetry & Shield Status */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span className="text-[10px] text-slate-300 hidden lg:inline">
             PROTOCOL: <span className="text-cyan-300 font-bold">{exerciseName.toUpperCase()}</span>
           </span>
+
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900/80 border border-slate-700 text-[10px] text-slate-300">
             <span>AEGIS:</span>
-            <span className={isShieldActive ? "text-cyan-300 font-black animate-pulse" : "text-slate-500"}>
-              {isShieldActive ? "ACTIVE" : "STANDBY"}
+            <span
+              className={
+                isShieldActive
+                  ? "text-cyan-300 font-black animate-pulse"
+                  : repCycleStatus === "STAND_UP_TO_RECHARGE"
+                  ? "text-amber-400 font-black animate-pulse"
+                  : "text-slate-500"
+              }
+            >
+              {isShieldActive
+                ? "SHIELD UP"
+                : repCycleStatus === "STAND_UP_TO_RECHARGE"
+                ? "STAND UP TO RECHARGE"
+                : "OFFLINE"}
             </span>
           </div>
         </div>
@@ -176,7 +210,7 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
               JOINT FLEXION
             </span>
             <span className="text-xs font-black text-cyan-300 font-mono">
-              TARGET: {targetAngle}°
+              TARGET: {Math.round(targetAngle)}°
             </span>
           </div>
         </div>
@@ -184,14 +218,28 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
         {/* GAUGE 2: Segmented LED Warp Tension / Hold Progress Bar */}
         <div className="flex flex-col items-center flex-1 max-w-xs mx-auto">
           <div className="w-full flex items-center justify-between text-[10px] font-bold mb-1">
-            <span className="text-slate-400 uppercase tracking-widest">KINETIC TENSION</span>
-            <span className={holdProgress >= 0.8 ? "text-cyan-300 font-black" : "text-slate-400"}>
-              {Math.round(holdProgress * 100)}%
+            <span className="text-slate-400 uppercase tracking-widest">
+              {repCycleStatus === "STAND_UP_TO_RECHARGE" ? "CAPACITOR RECHARGE" : "KINETIC TENSION"}
+            </span>
+            <span
+              className={
+                repCycleStatus === "STAND_UP_TO_RECHARGE"
+                  ? "text-amber-400 font-black animate-pulse"
+                  : isShieldActive
+                  ? "text-cyan-300 font-black"
+                  : "text-slate-400"
+              }
+            >
+              {repCycleStatus === "STAND_UP_TO_RECHARGE"
+                ? "STAND UP!"
+                : isShieldActive
+                ? "SHIELD UP"
+                : `${Math.round(holdProgress * 100)}%`}
             </span>
           </div>
           <div className="w-full flex gap-1 h-3 bg-slate-900 rounded p-0.5 border border-slate-800">
             {[...Array(10)].map((_, i) => {
-              const active = holdProgress >= (i + 1) * 0.1;
+              const active = isShieldActive || holdProgress >= (i + 1) * 0.1;
               return (
                 <div
                   key={i}
@@ -200,6 +248,8 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
                       ? i >= 8
                         ? "bg-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.9)]"
                         : "bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.6)]"
+                      : repCycleStatus === "STAND_UP_TO_RECHARGE"
+                      ? "bg-amber-600/30"
                       : "bg-slate-800/80"
                   }`}
                 />

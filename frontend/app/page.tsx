@@ -1052,6 +1052,98 @@ class AudioSynth {
     }
   }
 
+  playShipExplosion() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      // White noise explosion blast
+      const bufferSize = Math.floor(this.ctx.sampleRate * 1.6);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(650, now);
+      filter.frequency.exponentialRampToValueAtTime(35, now + 1.5);
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.75, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.ctx.destination);
+      noise.start(now);
+
+      // Deep saw sub-bass pitch rumble
+      const osc = this.ctx.createOscillator();
+      const oscGain = this.ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(18, now + 1.3);
+      oscGain.gain.setValueAtTime(0.65, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 1.3);
+      osc.connect(oscGain);
+      oscGain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 1.3);
+    } catch {
+      // safe
+    }
+  }
+
+  playShieldDischarge() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(320, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.35);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.35);
+    } catch {
+      // safe
+    }
+  }
+
+  playCapacitorRecharged() {
+    if (this.muted) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const freqs = [392.0, 523.25, 659.25, 783.99]; // G4, C5, E5, G5
+      freqs.forEach((freq, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        const start = now + idx * 0.05;
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.001, start);
+        gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.28);
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(start);
+        osc.stop(start + 0.28);
+      });
+    } catch {
+      // safe
+    }
+  }
+
   private droneOsc1: OscillatorNode | null = null;
   private droneOsc2: OscillatorNode | null = null;
   private droneGain: GainNode | null = null;
@@ -1622,6 +1714,13 @@ export default function AthleteMindPage() {
   const [showClinicianModal, setShowClinicianModal] = useState(false);
   const [battleStartTime, setBattleStartTime] = useState<number>(Date.now());
 
+  // Shield Capacitor, Rep Recalibration & Ship Integrity Mechanics
+  const [isShieldActiveState, setIsShieldActiveState] = useState(false);
+  const [repCycleStatus, setRepCycleStatus] = useState<"STAND_READY" | "HOLDING" | "STAND_UP_TO_RECHARGE">("STAND_READY");
+  const [flexibilityTolerance, setFlexibilityTolerance] = useState<number>(20);
+  const [isShipExploding, setIsShipExploding] = useState<boolean>(false);
+  const [isGameOver, setIsGameOver] = useState<boolean>(false);
+
   // Clinician Telemetry History
   const [angleTrace, setAngleTrace] = useState<AngleSample[]>([]);
   const [repDetails, setRepDetails] = useState<RepDetail[]>([]);
@@ -1762,6 +1861,15 @@ export default function AthleteMindPage() {
   const difficultyRef = useRef<DifficultyType>("standard");
   const activeShaderRef = useRef<SkeletalShader>("cyberpunk");
   const vaultRef = useRef<VaultData>(DEFAULT_VAULT);
+
+  // Shield capacitor & rep-gated defense refs
+  const shieldCapacitorChargedRef = useRef<boolean>(true);
+  const hasStoodUpSinceDeflectRef = useRef<boolean>(true);
+  const isSquatHoldingRef = useRef<boolean>(false);
+  const shieldActiveRef = useRef<boolean>(false);
+  const repCycleStatusRef = useRef<"STAND_READY" | "HOLDING" | "STAND_UP_TO_RECHARGE">("STAND_READY");
+  const flexibilityToleranceRef = useRef<number>(20);
+  const isShipExplodingRef = useRef<boolean>(false);
 
   useEffect(() => {
     isEnragedRef.current = isEnraged;
@@ -2212,6 +2320,18 @@ export default function AthleteMindPage() {
     particlesRef.current = [];
     floatingTextsRef.current = [];
 
+    // Reset Shield Capacitor & Ship Integrity Game Over
+    setIsGameOver(false);
+    setIsShipExploding(false);
+    isShipExplodingRef.current = false;
+    shieldCapacitorChargedRef.current = true;
+    hasStoodUpSinceDeflectRef.current = true;
+    isSquatHoldingRef.current = false;
+    shieldActiveRef.current = false;
+    setIsShieldActiveState(false);
+    repCycleStatusRef.current = "STAND_READY";
+    setRepCycleStatus("STAND_READY");
+
     // Reset Phase 6 Arcade Combat State
     setBossState("STANDARD");
     setComboStreak(0);
@@ -2228,6 +2348,25 @@ export default function AthleteMindPage() {
     const httpUrl = wsUrl.replace(/^wss?:/, (m) => (m === "wss:" ? "https:" : "http:")).replace(/\/ws\/pose$/, "");
     fetch(`${httpUrl}/api/session-reset`, { method: "POST" }).catch(() => {});
   }, []);
+
+  const triggerShipExplosion = useCallback(() => {
+    if (isShipExplodingRef.current) return;
+    isShipExplodingRef.current = true;
+    setIsShipExploding(true);
+    shieldActiveRef.current = false;
+    setIsShieldActiveState(false);
+    screenShakeRef.current = 50;
+    synth.playShipExplosion();
+    synth.playDefeat();
+    speakCoachCue("Critical integrity failure! Vessel destroyed!");
+
+    setTimeout(() => {
+      setIsShipExploding(false);
+      isShipExplodingRef.current = false;
+      setIsGameOver(true);
+      setMatchStatus("DEFEAT");
+    }, 1800);
+  }, [speakCoachCue]);
 
   const handleToggleMute = () => {
     synth.muted = !isMuted;
@@ -2548,12 +2687,13 @@ export default function AthleteMindPage() {
     if (incomingAttack) {
       return "PARRY_ATTACK";
     }
-    if (isHolding || (holdProgress > 0 && holdProgress < 1)) {
+    if (repCycleStatus === "STAND_UP_TO_RECHARGE") {
+      return "STAND_UP";
+    }
+    if (isShieldActiveState || isHolding || (holdProgress > 0 && holdProgress < 1)) {
       return "HOLD_POSITION";
     }
     if (
-      isDepthTargetMet ||
-      holdProgress >= 1 ||
       combatBannerType === "CRIT" ||
       combatBanner.includes("STAND") ||
       combatBanner.includes("DEFLECT") ||
@@ -2562,7 +2702,7 @@ export default function AthleteMindPage() {
       return "STAND_UP";
     }
     return "SQUAT_DOWN";
-  }, [hasFault, combatBannerType, combatBanner, incomingAttack, isHolding, holdProgress, isDepthTargetMet]);
+  }, [hasFault, combatBannerType, combatBanner, incomingAttack, isHolding, holdProgress, isShieldActiveState, repCycleStatus]);
 
   // ---------------------------------------------------------------------------
   // Lifecycle Finite State Machine & Session Controls
@@ -2883,17 +3023,11 @@ export default function AthleteMindPage() {
       fetchLeaderboard();
 
       // Phase 8: Record clinical recovery telemetry and evaluate badges
-      recordSessionAndEvaluateBadges();
-    } else if (playerHp <= 0 && matchStatus === "ACTIVE") {
-      setMatchStatus("DEFEAT");
-      setShowClinicianModal(true);
-      synth.playDefeat();
-      speakCoachCue("Mission failed. Recover and retry.");
-
-      // Phase 8: Record clinical recovery telemetry and evaluate badges
+    } else if (playerHp <= 0 && matchStatus === "ACTIVE" && !isShipExplodingRef.current && !isGameOver) {
+      triggerShipExplosion();
       recordSessionAndEvaluateBadges();
     }
-  }, [bossHp, playerHp, matchStatus, formPurity, speakCoachCue, updateVault, fetchLeaderboard, recordSessionAndEvaluateBadges]);
+  }, [bossHp, playerHp, matchStatus, formPurity, speakCoachCue, updateVault, fetchLeaderboard, recordSessionAndEvaluateBadges, triggerShipExplosion, isGameOver]);
 
   // Campaign Mission Completion Detection (8/8 Deflections)
   useEffect(() => {
@@ -3632,27 +3766,35 @@ export default function AthleteMindPage() {
         const dist = Math.hypot(curX - comX, curY - comY);
 
         if (dist <= perimeterRadius || p.progress >= 0.90) {
-          const activeCfg = EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"];
-          const metricRes = landmarks ? activeCfg.calculateMetrics(landmarks) : null;
-          const isAtDepth = metricRes
-            ? (metricRes.isTargetReached || metricRes.isHolding)
-            : (holdProgressRef.current >= 0.8);
-          const noFault = metricRes
-            ? !metricRes.faultDetected
-            : faultJointIndicesRef.current.length === 0;
+          const isShieldOnline = shieldActiveRef.current;
 
-          if (isAtDepth && noFault) {
+          if (isShieldOnline) {
             p.status = "DEFLECTED";
             hitStopUntilRef.current = nowMs + 80;
             screenShakeRef.current = 24;
             synth.playPerfectDeflect();
-            spawnParticles(curX, curY, 40, "#00f0ff");
+            synth.playShieldDischarge();
+            spawnParticles(curX, curY, 45, "#00f0ff");
             spawnParticles(curX, curY, 25, "#ffd700");
             spawnParticles(curX, curY, 25, "#78716c");
             spawnFloatingText("+1 ASTEROID DEFLECTED!", curX, curY - 24, "#00f0ff", 36);
+            spawnFloatingText("⚡ STAND UP TO RECHARGE SHIELD!", width / 2, height * 0.45, "#f59e0b", 30);
 
             deflectionsCompletedRef.current += 1;
             setDeflectionsCompleted((c) => c + 1);
+            setRepCount((r) => r + 1);
+
+            // Immediately discharge the capacitor!
+            shieldCapacitorChargedRef.current = false;
+            hasStoodUpSinceDeflectRef.current = false;
+            isSquatHoldingRef.current = false;
+            shieldActiveRef.current = false;
+            setIsShieldActiveState(false);
+            repCycleStatusRef.current = "STAND_UP_TO_RECHARGE";
+            setRepCycleStatus("STAND_UP_TO_RECHARGE");
+            holdProgressRef.current = 0;
+            setHoldProgress(0);
+
             setBioCredits((prev) => {
               const updated = prev + 25;
               try {
@@ -3668,15 +3810,28 @@ export default function AthleteMindPage() {
             p.status = "BREACHED";
             synth.playShieldBreach();
             shieldBreachFlashRef.current = nowMs + 400;
-            screenShakeRef.current = 16;
-            spawnParticles(curX, curY, 30, "#f59e0b");
-            spawnParticles(curX, curY, 20, "#78716c");
-            spawnFloatingText("HULL IMPACT — ASTEROID BREACH", curX, curY, "#f59e0b", 30);
+            screenShakeRef.current = 24;
+            spawnParticles(curX, curY, 35, "#f59e0b");
+            spawnParticles(curX, curY, 25, "#ef4444");
+
+            if (!hasStoodUpSinceDeflectRef.current) {
+              spawnFloatingText("HULL IMPACT — CAPACITOR EMPTY (STAND UP TO RESET)", curX, curY, "#ef4444", 26);
+            } else if (!isSquatHoldingRef.current) {
+              spawnFloatingText("HULL IMPACT — SHIELD OFFLINE (NOT HOLDING SQUAT)", curX, curY, "#ef4444", 26);
+            } else {
+              spawnFloatingText("HULL IMPACT — ASTEROID BREACH", curX, curY, "#ef4444", 28);
+            }
 
             if (isRestDayRef.current) {
               spawnFloatingText("🌿 RESTORATIVE SHIELD (0 DMG)", curX, curY + 32, "#10b981", 28);
             } else {
-              setPlayerHp((hp) => Math.max(0, hp - 12));
+              setPlayerHp((hp) => {
+                const nextHp = Math.max(0, hp - 20);
+                if (nextHp <= 0) {
+                  triggerShipExplosion();
+                }
+                return nextHp;
+              });
             }
 
             if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -3911,26 +4066,105 @@ export default function AthleteMindPage() {
 
         // Real-time Dynamic Hold Progress & Banner Update (Authoritative 60 FPS loop)
         if (gameStageRef.current === "ACTIVE_DEFLECTION") {
-          if (metrics.isHolding) {
-            const holdTarget = currentExerciseConfig.deflectionHoldTime || 1.5;
-            setHoldProgress((prev) => {
-              const next = Math.min(1.0, prev + 0.033 / holdTarget);
-              holdProgressRef.current = next;
-              return next;
-            });
-            setCombatBanner(currentExerciseConfig.prompts.hold);
-            setCombatBannerType("HOLD");
-          } else if (metrics.faultDetected) {
+          const currentAngle = metrics.primaryAngle !== undefined ? metrics.primaryAngle : 180;
+          const baseTarget = currentExerciseConfig.targetAngle || 90;
+          const effectiveTarget = activeExerciseRef.current === "squats"
+            ? Math.round(90 + (flexibilityToleranceRef.current / 100) * 80)
+            : baseTarget;
+
+          // Standing Lockout Detection (Knee angle >= 145 degrees for squats)
+          const isStanding = activeExerciseRef.current === "squats"
+            ? currentAngle >= 145
+            : (metrics.primaryAngle !== undefined && metrics.primaryAngle >= 150);
+
+          // Deep Hold Detection (Knee angle <= effectiveTarget for squats)
+          const isAtTargetDepth = activeExerciseRef.current === "squats"
+            ? currentAngle <= effectiveTarget
+            : (metrics.isTargetReached || metrics.isHolding);
+
+          if (metrics.faultDetected) {
+            // Fault detected: disable shield immediately
+            shieldActiveRef.current = false;
+            isSquatHoldingRef.current = false;
+            setIsShieldActiveState(false);
             setCombatBanner(metrics.faultMessage || currentExerciseConfig.prompts.fault || currentExerciseConfig.faultPrompt);
             setCombatBannerType("FAULT");
             holdProgressRef.current = 0;
             setHoldProgress(0);
-          } else if (metrics.isTargetReached) {
-            setCombatBanner(currentExerciseConfig.prompts.complete);
-            setCombatBannerType("CRIT");
+          } else if (isStanding) {
+            // User is standing up / upright
+            if (!hasStoodUpSinceDeflectRef.current) {
+              hasStoodUpSinceDeflectRef.current = true;
+              shieldCapacitorChargedRef.current = true;
+              synth.playCapacitorRecharged();
+              const canvas = canvasRef.current;
+              if (canvas) {
+                spawnFloatingText("⚡ CAPACITOR RECHARGED! SQUAT TO ENGAGE!", canvas.width / 2, canvas.height * 0.45, "#00f0ff", 30);
+              }
+              repCycleStatusRef.current = "STAND_READY";
+              setRepCycleStatus("STAND_READY");
+            }
+
+            // Shield is strictly disabled while standing
+            shieldActiveRef.current = false;
+            isSquatHoldingRef.current = false;
+            setIsShieldActiveState(false);
+            holdProgressRef.current = 0;
+            setHoldProgress(0);
+
+            if (repCycleStatusRef.current === "STAND_UP_TO_RECHARGE") {
+              setCombatBanner("STAND UP FULLY TO RECHARGE SHIELD!");
+              setCombatBannerType("WAITING");
+            } else {
+              setCombatBanner(currentExerciseConfig.prompts.initial);
+              setCombatBannerType("WAITING");
+            }
+          } else if (isAtTargetDepth) {
+            // User is at target squat depth!
+            if (shieldCapacitorChargedRef.current) {
+              // Capacitor is ready: SHIELD IS ONLINE!
+              isSquatHoldingRef.current = true;
+              shieldActiveRef.current = true;
+              setIsShieldActiveState(true);
+              repCycleStatusRef.current = "HOLDING";
+              setRepCycleStatus("HOLDING");
+
+              const holdTarget = currentExerciseConfig.deflectionHoldTime || 1.5;
+              setHoldProgress((prev) => {
+                const next = Math.min(1.0, prev + 0.033 / holdTarget);
+                holdProgressRef.current = next;
+                return next;
+              });
+
+              setCombatBanner("🛡️ SHIELD ONLINE // HOLD POSITION!");
+              setCombatBannerType("HOLD");
+            } else {
+              // Capacitor was discharged because user didn't stand up!
+              isSquatHoldingRef.current = false;
+              shieldActiveRef.current = false;
+              setIsShieldActiveState(false);
+              repCycleStatusRef.current = "STAND_UP_TO_RECHARGE";
+              setRepCycleStatus("STAND_UP_TO_RECHARGE");
+              setCombatBanner("STAND UP TO RECHARGE SHIELD!");
+              setCombatBannerType("FAULT");
+              holdProgressRef.current = 0;
+              setHoldProgress(0);
+            }
           } else {
-            setCombatBanner(currentExerciseConfig.prompts.initial);
-            setCombatBannerType("WAITING");
+            // User is between standing and squat depth (descending or ascending)
+            // Shield is DISABLED!
+            shieldActiveRef.current = false;
+            isSquatHoldingRef.current = false;
+            setIsShieldActiveState(false);
+
+            if (repCycleStatusRef.current === "STAND_UP_TO_RECHARGE") {
+              setCombatBanner("STAND UP TO RECHARGE SHIELD!");
+              setCombatBannerType("FAULT");
+            } else {
+              setCombatBanner(currentExerciseConfig.prompts.initial);
+              setCombatBannerType("WAITING");
+            }
+
             holdProgressRef.current = Math.max(0, holdProgressRef.current - 0.04);
             setHoldProgress(holdProgressRef.current);
           }
@@ -4587,6 +4821,11 @@ export default function AthleteMindPage() {
           isMuted={isMuted}
           isRestDay={isRestDay}
           energyCores={vault.energyCores}
+          flexibilityTolerance={flexibilityTolerance}
+          onSelectFlexibilityTolerance={(pct) => {
+            setFlexibilityTolerance(pct);
+            flexibilityToleranceRef.current = pct;
+          }}
           onToggleMute={handleToggleMute}
           onToggleRestDay={handleToggleRestDay}
           onSelectSoundpack={handleBuyOrEquipSoundpack}
@@ -4723,12 +4962,23 @@ export default function AthleteMindPage() {
       <main className="relative flex-1 w-full h-[calc(100vh-3.5rem)] flex items-center justify-center p-0 bg-[#050811] overflow-hidden">
         <FuturisticCockpitFrame
           currentAngle={primaryAngle}
-          targetAngle={(EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"]).targetAngle || 90}
+          targetAngle={
+            activeExerciseRef.current === "squats"
+              ? Math.round(90 + (flexibilityTolerance / 100) * 80)
+              : (EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"]).targetAngle || 90
+          }
           formPurity={formPurity}
           holdProgress={holdProgress}
           exerciseName={(EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"]).name}
           torsoTilt={0}
-          isShieldActive={isDepthTargetMet || isHolding || holdProgress > 0}
+          isShieldActive={isShieldActiveState}
+          repCycleStatus={repCycleStatus}
+          flexibilityTolerance={flexibilityTolerance}
+          onFlexibilityChange={(pct) => {
+            setFlexibilityTolerance(pct);
+            flexibilityToleranceRef.current = pct;
+            synth.playCalibrationBeep(false);
+          }}
           className={`h-[92vh] max-h-[92vh] max-w-full aspect-[4/3] md:aspect-[16/9] mx-auto shadow-2xl transition-all duration-500 ${
             isEnraged
               ? "border-rose-500/80 shadow-[0_0_60px_rgba(244,63,94,0.4)]"
@@ -4752,9 +5002,11 @@ export default function AthleteMindPage() {
             <RocketBlueprintHUD
               playerHp={playerHp}
               playerMaxHp={100}
-              isShieldActive={isDepthTargetMet || isHolding || holdProgress > 0}
+              isShieldActive={isShieldActiveState}
               shieldHoldProgress={holdProgress}
               isBreached={(shieldBreachFlashRef.current > performance.now()) || screenGlitch}
+              isExploding={isShipExploding}
+              repCycleStatus={repCycleStatus}
             />
 
             {/* Quick Tactical Metrics: REPS & STREAK */}
@@ -5326,6 +5578,111 @@ export default function AthleteMindPage() {
               <span>🛡️ VAULT</span>
             </button>
           </div>
+
+          {/* --------------------------------------------------------------- */}
+          {/* SHIP EXPLOSION SEQUENCE OVERLAY (CRITICAL INTEGRITY 0%)         */}
+          {/* --------------------------------------------------------------- */}
+          {isShipExploding && (
+            <div className="absolute inset-0 z-45 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center pointer-events-none animate-in fade-in duration-200">
+              {/* Expanding Shockwave Rings */}
+              <div className="absolute w-[350px] sm:w-[550px] h-[350px] sm:h-[550px] rounded-full border-4 border-amber-500/90 animate-ping pointer-events-none" />
+              <div className="absolute w-[500px] sm:w-[750px] h-[500px] sm:h-[750px] rounded-full border-2 border-rose-500/70 animate-ping delay-150 pointer-events-none" />
+              {/* Central Fireball Sphere */}
+              <div className="relative w-64 sm:w-80 h-64 sm:h-80 rounded-full bg-radial from-yellow-300 via-amber-500 to-rose-600 shadow-[0_0_120px_rgba(244,63,94,1)] animate-pulse flex flex-col items-center justify-center text-center">
+                <span className="text-7xl animate-bounce">💥</span>
+                <span className="text-xs font-mono font-black text-black bg-yellow-300 px-3 py-1 rounded-full mt-2 tracking-widest uppercase">
+                  DETONATION
+                </span>
+              </div>
+              <div className="mt-8 text-center px-4">
+                <h2 className="text-2xl sm:text-3xl font-black text-rose-400 font-mono tracking-widest uppercase animate-pulse drop-shadow-[0_0_20px_rgba(244,63,94,0.9)]">
+                  ⚠️ CRITICAL HULL COLLAPSE // EXPLOSION DETECTED
+                </h2>
+                <p className="text-xs sm:text-sm font-mono text-slate-300 uppercase tracking-wider mt-1">
+                  VESSEL INTEGRITY TERMINATED • STRUCTURAL DISINTEGRATION
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* --------------------------------------------------------------- */}
+          {/* DEDICATED ENDGAME SCREEN (VESSEL DESTROYED / MISSION FAILED)    */}
+          {/* --------------------------------------------------------------- */}
+          {isGameOver && matchStatus === "DEFEAT" && !isShipExploding && (
+            <div className="absolute inset-0 z-45 bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 sm:p-6 animate-in fade-in zoom-in duration-300">
+              <div className="relative w-full max-w-2xl bg-gradient-to-b from-[#0e0714] to-[#050811] border-2 border-rose-500/80 rounded-3xl p-6 sm:p-8 shadow-[0_0_80px_rgba(244,63,94,0.4)] flex flex-col items-center text-center font-mono">
+                {/* Alert Header Icon */}
+                <div className="relative w-20 h-20 rounded-2xl bg-rose-950/80 border-2 border-rose-500/90 flex items-center justify-center text-4xl shadow-[0_0_35px_rgba(244,63,94,0.7)] mb-4 animate-bounce">
+                  <span>💀</span>
+                </div>
+
+                <div className="inline-block px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500/60 text-rose-300 text-xs font-black tracking-widest uppercase mb-2">
+                  CRITICAL FAILURE // INTEGRITY 0%
+                </div>
+
+                <h1 className="text-3xl sm:text-4xl font-black text-white uppercase tracking-wider mb-2 drop-shadow-[0_0_25px_rgba(244,63,94,0.8)]">
+                  VESSEL DESTROYED
+                </h1>
+
+                <p className="text-xs sm:text-sm text-slate-300 uppercase tracking-wider max-w-md mb-6">
+                  The Explorer suffered fatal kinetic decompression. Shield capacitor was overwhelmed by asteroid bombardment.
+                </p>
+
+                {/* Battle Telemetry Matrix */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full mb-6">
+                  <div className="p-3 rounded-2xl bg-black/60 border border-slate-800 flex flex-col items-center">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold">Deflected</span>
+                    <span className="text-2xl font-black text-cyan-300 mt-1">{deflectionsCompleted} / {deflectionsTarget}</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-black/60 border border-slate-800 flex flex-col items-center">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold">Integrity</span>
+                    <span className="text-2xl font-black text-rose-400 mt-1">0%</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-black/60 border border-slate-800 flex flex-col items-center">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold">Form Purity</span>
+                    <span className="text-2xl font-black text-emerald-400 mt-1">{formPurity}%</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-black/60 border border-slate-800 flex flex-col items-center">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold">Total Reps</span>
+                    <span className="text-2xl font-black text-amber-400 mt-1">{repCount}</span>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-md">
+                  <button
+                    onClick={() => {
+                      setIsGameOver(false);
+                      handleRestartCampaign();
+                    }}
+                    className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black text-xs uppercase tracking-wider shadow-[0_0_25px_rgba(244,63,94,0.5)] transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <span>🔄</span>
+                    <span>REPAIR & RETRY</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowClinicianModal(true)}
+                    className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 font-black text-xs uppercase tracking-wider shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <span>📊</span>
+                    <span>DEBRIEF (SOAP)</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsGameOver(false);
+                      setActiveView("MAIN_MENU");
+                    }}
+                    className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <span>🚀</span>
+                    <span>MAIN MENU</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </FuturisticCockpitFrame>
       </main>
       </>
