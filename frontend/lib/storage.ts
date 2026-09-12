@@ -290,8 +290,12 @@ export function getLeaderboard(): LeaderboardEntry[] {
   const history = getMatchHistory();
   const rivals = [...MOCK_RIVALS];
 
-  const winningMatches = history.filter((m) => m.result === "VICTORY");
-  const bestRun: MatchRecord | undefined = winningMatches.sort((a, b) => b.score - a.score)[0];
+  let bestRun: MatchRecord | null = null;
+  history.forEach((m) => {
+    if (m.result === "VICTORY" && (!bestRun || m.score > bestRun.score)) {
+      bestRun = m;
+    }
+  });
 
   if (bestRun) {
     const minutes = Math.floor(bestRun.durationSeconds / 60).toString().padStart(2, "0");
