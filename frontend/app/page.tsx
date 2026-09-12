@@ -971,10 +971,9 @@ function drawVisuals(
     ctx.restore();
   }
 
-  const ghostX = w * 0.16;
-  const ghostFloorY = h * 0.82;
-  const ghostStandHipY = ghostFloorY - 140;
-  const ghostStandHeadY = ghostStandHipY - 95;
+  // 3. Ghost Stickman Anchor: Safe Upper-Right Corner HUD (x = canvas.width - 120, y = 80)
+  const ghostX = w - 120;
+  const ghostY = 80;
 
   let ghostDepth = 0;
   let ghostPhaseLabel = "DESCENT";
@@ -989,48 +988,55 @@ function drawVisuals(
     ghostPhaseLabel = `PUSH ${(4.5 - ghostCycleSec).toFixed(1)}s`;
   }
 
-  const gHeadY = ghostStandHeadY + ghostDepth * 50;
-  const gShoulderY = gHeadY + 25;
-  const gHipY = ghostStandHipY + ghostDepth * 50;
-  const gKneeX = ghostX - ghostDepth * 28;
-  const gKneeY = ghostFloorY - 55 + ghostDepth * 15;
+  // Mini holographic pacing stickman anchored at (ghostX, ghostY)
+  const gHeadY = ghostY - 28 + ghostDepth * 14;
+  const gShoulderY = gHeadY + 12;
+  const gHipY = ghostY - 2 + ghostDepth * 14;
+  const gKneeX = ghostX - 10 - ghostDepth * 8;
+  const gKneeY = ghostY + 16 + ghostDepth * 4;
   const gAnkleX = ghostX;
-  const gAnkleY = ghostFloorY;
-  const gWristX = ghostX + 28;
-  const gWristY = gShoulderY + 20;
+  const gAnkleY = ghostY + 34;
+  const gWristX = ghostX + 12;
+  const gWristY = gShoulderY + 10;
 
   ctx.save();
   const ghostColor = isGhostSync ? "#10b981" : "#00f0ff";
-  ctx.strokeStyle = isGhostSync ? "rgba(16, 185, 129, 0.65)" : "rgba(0, 240, 255, 0.55)";
-  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = isGhostSync ? "rgba(16, 185, 129, 0.75)" : "rgba(0, 240, 255, 0.65)";
+  ctx.lineWidth = 3.0;
   ctx.lineCap = "round";
-  ctx.shadowBlur = isGhostSync ? 18 : 12;
+  ctx.shadowBlur = isGhostSync ? 16 : 10;
   ctx.shadowColor = ghostColor;
 
+  // Head
   ctx.beginPath();
-  ctx.arc(ghostX, gHeadY, 12, 0, 2 * Math.PI);
+  ctx.arc(ghostX, gHeadY, 8, 0, 2 * Math.PI);
   ctx.stroke();
 
+  // Torso
   ctx.beginPath();
   ctx.moveTo(ghostX, gShoulderY);
   ctx.lineTo(ghostX, gHipY);
   ctx.stroke();
 
+  // Arm
   ctx.beginPath();
   ctx.moveTo(ghostX, gShoulderY);
   ctx.lineTo(gWristX, gWristY);
   ctx.stroke();
 
+  // Upper Leg
   ctx.beginPath();
   ctx.moveTo(ghostX, gHipY);
   ctx.lineTo(gKneeX, gKneeY);
   ctx.stroke();
 
+  // Lower Leg
   ctx.beginPath();
   ctx.moveTo(gKneeX, gKneeY);
   ctx.lineTo(gAnkleX, gAnkleY);
   ctx.stroke();
 
+  // Inner Core
   ctx.lineWidth = 1.2;
   ctx.strokeStyle = "#ffffff";
   ctx.beginPath();
@@ -1040,17 +1046,18 @@ function drawVisuals(
   ctx.lineTo(gAnkleX, gAnkleY);
   ctx.stroke();
 
+  // Header & Phase Badge
   ctx.save();
-  ctx.translate(ghostX, gHeadY - 26);
+  ctx.translate(ghostX, ghostY - 42);
   ctx.scale(-1, 1);
-  ctx.font = "bold 10px monospace";
+  ctx.font = "bold 9px monospace";
   ctx.fillStyle = ghostColor;
   ctx.textAlign = "center";
   ctx.fillText("AI GHOST // 4.5s CADENCE", 0, 0);
 
   ctx.font = "900 9px monospace";
   ctx.fillStyle = isGhostSync ? "#10b981" : "#fbbf24";
-  ctx.fillText(isGhostSync ? "✦ SYNCHRONIZED (+25%) ✦" : `[${ghostPhaseLabel}]`, 0, 12);
+  ctx.fillText(isGhostSync ? "✦ SYNCHRONIZED (+25%) ✦" : `[${ghostPhaseLabel}]`, 0, 11);
   ctx.restore();
   ctx.restore();
 
@@ -1161,7 +1168,7 @@ function drawVisuals(
   }
 
   ctx.save();
-  ctx.translate(w * 0.82, 32);
+  ctx.translate(w * 0.5, 28);
   ctx.scale(-1, 1);
   ctx.font = "900 12px monospace";
   ctx.textAlign = "center";
@@ -1350,6 +1357,23 @@ export default function Home() {
   const lastPenaltyRef = useRef<number>(0);
   const hitAwardedRepRef = useRef<number>(-1);
 
+  // Camera & Device Lifecycle Management
+  const [cameraStatus, setCameraStatus] = useState<"INITIALIZING" | "ACTIVE" | "ERROR">("INITIALIZING");
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Stable Refs to prevent camera effect destruction during combat loops
+  const currentBossRef = useRef(BOSS_CATALOG[selectedBossId] || BOSS_CATALOG.goliath);
+  const profileRef = useRef(profile);
+  const isClashActiveRef = useRef(isClashActive);
+  const clashProgressRef = useRef(clashProgress);
+  const triggerFlashRef = useRef<(type: "HIT" | "PENALTY" | "BOSS_ATTACK") => void>(() => {});
+  const triggerCombatPopupRef = useRef<(text: string, isCrit?: boolean, isOverdrive?: boolean) => void>(() => {});
+  const fireOverdriveBeamRef = useRef<() => void>(() => {});
+  const startCalibrationRef = useRef<(bossId?: string) => void>(() => {});
+  const finishMatchRef = useRef<(outcome: "VICTORY" | "DEFEAT") => void>(() => {});
+  const triggerBossDialogueRef = useRef<(text: string) => void>(() => {});
+
   // Load persistent client state on mount
   useEffect(() => {
     setProfile(getProfile());
@@ -1505,13 +1529,13 @@ export default function Home() {
       setBossHp((prevHp) => {
         const nextHp = Math.max(0, prevHp - 25);
         if (nextHp === 0) {
-          finishMatch("VICTORY");
+          finishMatchRef.current("VICTORY");
           sfx.victory();
           coachSpeak("Target neutralized! Overdrive execution flawless.");
         }
         return nextHp;
       });
-      triggerFlash("HIT");
+      triggerFlashRef.current("HIT");
       if (ticks >= 10) {
         clearInterval(damageInterval);
         setIsOverdriveFiring(false);
@@ -1577,6 +1601,117 @@ export default function Home() {
     coachSpeak(`Encounter initialized. ${countdown} seconds to calibrate mobility.`);
   }, [selectedBossId, settings.countdownSeconds]);
 
+  // Synchronize dynamic state with stable refs
+  useEffect(() => { currentBossRef.current = currentBoss; }, [currentBoss]);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
+  useEffect(() => { isClashActiveRef.current = isClashActive; }, [isClashActive]);
+  useEffect(() => { clashProgressRef.current = clashProgress; }, [clashProgress]);
+  useEffect(() => { triggerFlashRef.current = triggerFlash; }, [triggerFlash]);
+  useEffect(() => { triggerCombatPopupRef.current = triggerCombatPopup; }, [triggerCombatPopup]);
+  useEffect(() => { fireOverdriveBeamRef.current = fireOverdriveBeam; }, [fireOverdriveBeam]);
+  useEffect(() => { startCalibrationRef.current = startCalibration; }, [startCalibration]);
+  useEffect(() => { finishMatchRef.current = finishMatch; }, [finishMatch]);
+  useEffect(() => { triggerBossDialogueRef.current = triggerBossDialogue; }, [triggerBossDialogue]);
+
+  // Resilient MediaPipe Script Detection
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if ((window as unknown as { Pose?: unknown }).Pose) {
+        setScriptReady(true);
+      } else {
+        const interval = setInterval(() => {
+          if ((window as unknown as { Pose?: unknown }).Pose) {
+            setScriptReady(true);
+            clearInterval(interval);
+          }
+        }, 150);
+        return () => clearInterval(interval);
+      }
+    }
+  }, []);
+
+  // Re-attach video stream if video element mounts or remounts
+  useEffect(() => {
+    if (streamRef.current && videoRef.current && videoRef.current.srcObject !== streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(console.error);
+    }
+  }, [currentView, cameraStatus]);
+
+  // Immediate Camera Mount: Stream webcam right away so feed is visible without waiting for CDN/MediaPipe
+  useEffect(() => {
+    let isRunning = true;
+    const initWebcam = async () => {
+      if (streamRef.current) return;
+      try {
+        setCameraStatus("INITIALIZING");
+        setCameraError(null);
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+            audio: false,
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+        if (!isRunning) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          try {
+            await videoRef.current.play();
+          } catch (e) {
+            console.warn("Autoplay error:", e);
+          }
+        }
+        setCameraStatus("ACTIVE");
+      } catch (err: unknown) {
+        console.error("Camera init error:", err);
+        setCameraStatus("ERROR");
+        setCameraError(err instanceof Error ? err.message : "Camera access denied or device busy");
+      }
+    };
+    initWebcam();
+    return () => {
+      isRunning = false;
+    };
+  }, []);
+
+  // Explicit Camera Restart / Recovery Trigger
+  const restartCamera = useCallback(async () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setCameraStatus("INITIALIZING");
+    setCameraError(null);
+    try {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+          audio: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(console.error);
+      }
+      setCameraStatus("ACTIVE");
+    } catch (err: unknown) {
+      console.error("Camera restart failed:", err);
+      setCameraStatus("ERROR");
+      setCameraError(err instanceof Error ? err.message : "Failed to access camera");
+    }
+  }, []);
+
   // Dynamic Rep Cadence Metronome (4s cycle: 2s eccentric descent, 1s isometric hold, 1s concentric push)
   useEffect(() => {
     if (game.stage !== "ACTIVE") return;
@@ -1627,14 +1762,14 @@ export default function Home() {
 
     const interval = setInterval(() => {
       sfx.glitchWarning();
-      triggerFlash("PENALTY");
+      triggerFlashRef.current("PENALTY");
       triggerRumble(200);
       spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "-10 MELTDOWN DRAIN", "#ef4444");
 
       setGame((prev) => {
         const nextPlayerHp = Math.max(0, prev.playerHp - 10);
         if (nextPlayerHp <= 0) {
-          finishMatch("DEFEAT");
+          finishMatchRef.current("DEFEAT");
           sfx.defeat();
           coachSpeak("System overwhelmed by reactor meltdown.");
         }
@@ -1672,15 +1807,15 @@ export default function Home() {
         lastPenaltyRef.current = 0;
         hitAwardedRepRef.current = -1;
         lastRepTimestampRef.current = Date.now();
-        setBossHp(currentBoss.hp);
+        setBossHp(currentBossRef.current.hp);
 
         setGame((prev) => ({
           ...prev,
           stage: "ACTIVE",
           playerHp: 100,
-          bossHp: currentBoss.hp,
+          bossHp: currentBossRef.current.hp,
           playerOverheat: 0,
-          bossAttackTimer: currentBoss.attackInterval,
+          bossAttackTimer: currentBossRef.current.attackInterval,
           stats: { ...INITIAL_STATS },
         }));
         triggerBossDialogue(currentBoss.taunts.intro);
@@ -1697,8 +1832,8 @@ export default function Home() {
     const interval = setInterval(() => {
       setGame((prev) => {
         const nextOverheat = Math.max(0, prev.playerOverheat - 0.5);
-        const isEnraged = bossHpRef.current <= currentBoss.hp * 0.4;
-        const resetTimer = isEnraged ? currentBoss.attackInterval * 0.5 : currentBoss.attackInterval;
+        const isEnraged = bossHpRef.current <= currentBossRef.current.hp * 0.4;
+        const resetTimer = isEnraged ? currentBossRef.current.attackInterval * 0.5 : currentBossRef.current.attackInterval;
 
         if (prev.bossAttackTimer <= 0.1) {
           sfx.bossAttack();
@@ -1707,7 +1842,7 @@ export default function Home() {
 
           const nextPlayerHp = Math.max(0, prev.playerHp - 20);
           if (nextPlayerHp <= 0) {
-            finishMatch("DEFEAT");
+            finishMatchRef.current("DEFEAT");
             sfx.defeat();
             coachSpeak("Mission failed. Reboot simulation.");
           }
@@ -1742,7 +1877,7 @@ export default function Home() {
   }, [game.stage, settings.musicEnabled]);
 
   useEffect(() => {
-    sfx.setEnraged(bossHp <= currentBoss.hp * 0.4 && bossHp > 0);
+    sfx.setEnraged(bossHp <= currentBossRef.current.hp * 0.4 && bossHp > 0);
   }, [bossHp, currentBoss]);
 
   // Incoming Plasma Projectile Spawner (Direct Boss Interaction every 13s)
@@ -1796,7 +1931,7 @@ export default function Home() {
           setGame((prev) => {
             const nextHp = Math.max(0, prev.playerHp - 15);
             if (nextHp <= 0) {
-              finishMatch("DEFEAT");
+              finishMatchRef.current("DEFEAT");
               sfx.defeat();
               coachSpeak("Defenses breached by plasma orb.");
             }
@@ -1866,7 +2001,7 @@ export default function Home() {
         }
 
         if (data.event === "CIRCUIT_PHASE_ADVANCE") {
-          triggerCombatPopup("PHASE CLEARED!", true, true);
+          triggerCombatPopupRef.current("PHASE CLEARED!", true, true);
           sfx.cadenceBonus();
           triggerRumble(250);
         }
@@ -1892,7 +2027,7 @@ export default function Home() {
         const isHold = data.phase.includes("HOLD") || data.phase === "LOCKOUT";
 
         if (overdriveGaugeRef.current >= 100 && !isOverdriveFiringRef.current && isHold && (data.hold_time >= 2.5 || data.hold_progress >= 0.95)) {
-          fireOverdriveBeam();
+          fireOverdriveBeamRef.current();
         }
 
         const shouldDamageBoss = isRepComplete || (hasDamage && hitAwardedRepRef.current !== data.rep_count);
@@ -1909,7 +2044,7 @@ export default function Home() {
 
           const curCombo = comboStreakRef.current;
           const comboMult = curCombo >= 5 ? 2.0 : curCombo >= 3 ? 1.5 : 1.0;
-          const dailyStreakBonus = Math.min(50, profile.streak * 10);
+          const dailyStreakBonus = Math.min(50, profileRef.current.streak * 10);
           const dailyMult = 1 + (dailyStreakBonus / 100);
 
           const finalDamage = Math.round(cadenceDamage * comboMult * dailyMult);
@@ -1922,21 +2057,21 @@ export default function Home() {
           setBossHp((prevHp) => {
             const nextHp = Math.max(0, prevHp - finalDamage);
 
-            if (!hasClashedRef.current && nextHp <= currentBoss.hp * 0.5 && nextHp > 0) {
+            if (!hasClashedRef.current && nextHp <= currentBossRef.current.hp * 0.5 && nextHp > 0) {
               hasClashedRef.current = true;
               setIsClashActive(true);
               clashHoldStartRef.current = 0;
               sfx.sirenWarning();
-              triggerBossDialogue(currentBoss.taunts.clash);
+              triggerBossDialogueRef.current(currentBossRef.current.taunts.clash);
               coachSpeak("Boss clash initiated! Hold a deep squat for 4 seconds to push back!");
             }
 
-            if (nextHp <= currentBoss.hp * 0.4 && prevHp > currentBoss.hp * 0.4) {
-              triggerBossDialogue(currentBoss.taunts.enrage);
+            if (nextHp <= currentBossRef.current.hp * 0.4 && prevHp > currentBossRef.current.hp * 0.4) {
+              triggerBossDialogueRef.current(currentBossRef.current.taunts.enrage);
             }
 
             if (nextHp === 0) {
-              finishMatch("VICTORY");
+              finishMatchRef.current("VICTORY");
               sfx.victory();
               coachSpeak("Target neutralized! Excellent form.");
             }
@@ -1953,8 +2088,8 @@ export default function Home() {
           }
 
           triggerRumble(isCadenceSync ? 250 : 150);
-          triggerFlash("HIT");
-          triggerCombatPopup(popupText, isCadenceSync, curCombo >= 5);
+          triggerFlashRef.current("HIT");
+          triggerCombatPopupRef.current(popupText, isCadenceSync, curCombo >= 5);
           spawnParticles(
             curJointRef.current.x,
             curJointRef.current.y,
@@ -1973,7 +2108,7 @@ export default function Home() {
             setComboStreak((prev) => {
               const next = Math.min(5, prev + 1);
               if (next === 5) {
-                triggerBossDialogue(currentBoss.taunts.hit5x);
+                triggerBossDialogueRef.current(currentBossRef.current.taunts.hit5x);
               }
               return next;
             });
@@ -1993,7 +2128,7 @@ export default function Home() {
           if (data.valgus || data.fault_name === "VALGUS") {
             nextStats.valgusWarnings += 1;
             if (comboStreakRef.current > 1) {
-              triggerBossDialogue(currentBoss.taunts.comboBreak);
+              triggerBossDialogueRef.current(currentBossRef.current.taunts.comboBreak);
             }
             setComboStreak(1);
           }
@@ -2016,8 +2151,8 @@ export default function Home() {
               nextStats.cadenceBonusReps = prev.stats.cadenceBonusReps + 1;
             }
 
-            const isEnraged = bossHpRef.current <= currentBoss.hp * 0.4;
-            nextBossTimer = isEnraged ? currentBoss.attackInterval * 0.5 : currentBoss.attackInterval;
+            const isEnraged = bossHpRef.current <= currentBossRef.current.hp * 0.4;
+            nextBossTimer = isEnraged ? currentBossRef.current.attackInterval * 0.5 : currentBossRef.current.attackInterval;
           }
 
           if (data.status === "penalty") {
@@ -2027,7 +2162,7 @@ export default function Home() {
               sfx.penalty();
               sfx.glitchWarning();
               triggerRumble(300);
-              triggerFlash("PENALTY");
+              triggerFlashRef.current("PENALTY");
               spawnParticles(curJointRef.current.x, curJointRef.current.y, ["#ef4444", "#dc2626", "#b91c1c", "#f87171"]);
               spawnShockwave(curJointRef.current.x, curJointRef.current.y, "#ef4444");
               spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "! EGO LIFT", "#ef4444");
@@ -2035,14 +2170,14 @@ export default function Home() {
               nextStats.egoPenalties += 1;
               nextStats.currentCritStreak = 0;
               if (comboStreakRef.current > 1) {
-                triggerBossDialogue(currentBoss.taunts.comboBreak);
+                triggerBossDialogueRef.current(currentBossRef.current.taunts.comboBreak);
               }
               setComboStreak(1);
               nextOverheat = 100;
               nextPlayerHp = Math.max(0, prev.playerHp - 25);
 
               if (nextPlayerHp <= 0) {
-                finishMatch("DEFEAT");
+                finishMatchRef.current("DEFEAT");
                 sfx.defeat();
                 coachSpeak("System critical. You have been defeated.");
               }
@@ -2076,8 +2211,17 @@ export default function Home() {
 
     pose.onResults((results: PoseResults) => {
       const canvas = canvasRef.current;
-      const ctx = canvas?.getContext("2d");
-      if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const video = videoRef.current;
+      if (!canvas) return;
+
+      // 2. Landmark Coordinate Normalization: Sync internal drawing buffer with display size
+      if (video && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (results.poseLandmarks) {
         const lms = results.poseLandmarks;
@@ -2153,7 +2297,7 @@ export default function Home() {
           );
         }
 
-        if (isClashActive) {
+        if (isClashActiveRef.current) {
           const kneeAngle = gameRef.current.engine.knee_angle ?? 180;
           const isHoldingClash = kneeAngle <= 95 || gameRef.current.engine.phase.includes("HOLD");
 
@@ -2170,8 +2314,8 @@ export default function Home() {
               sfx.fanfareChord();
               sfx.bassDrop();
               triggerRumble(500);
-              triggerFlash("HIT");
-              triggerCombatPopup("⚔️ CLASH WON! -150 DMG!", true, true);
+              triggerFlashRef.current("HIT");
+              triggerCombatPopupRef.current("⚔️ CLASH WON! -150 DMG!", true, true);
               spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "COUNTER-STRIKE +150", "#10b981");
               spawnParticles(curJointRef.current.x, curJointRef.current.y, ["#10b981", "#ffd700", "#38bdf8", "#ffffff"]);
               spawnShockwave(curJointRef.current.x, curJointRef.current.y, "#10b981");
@@ -2179,7 +2323,7 @@ export default function Home() {
               setBossHp((prev) => {
                 const nextHp = Math.max(0, prev - 150);
                 if (nextHp === 0) {
-                  finishMatch("VICTORY");
+                  finishMatchRef.current("VICTORY");
                   sfx.victory();
                   coachSpeak("Boss neutralized by massive counter-strike!");
                 }
@@ -2211,8 +2355,8 @@ export default function Home() {
               sfx.deflect();
               sfx.bassDrop();
               triggerRumble(200);
-              triggerFlash("HIT");
-              triggerCombatPopup("PROJECTILE DEFLECTED! +75", true, false);
+              triggerFlashRef.current("HIT");
+              triggerCombatPopupRef.current("PROJECTILE DEFLECTED! +75", true, false);
               spawnFloatingText(orb.x, orb.y, "DEFLECTED +75", "#38bdf8");
               spawnParticles(orb.x, orb.y, ["#38bdf8", "#00f0ff", "#ffffff", "#f43f5e"]);
               spawnShockwave(orb.x, orb.y, "#38bdf8");
@@ -2265,8 +2409,8 @@ export default function Home() {
                 sfx.dodgeSuccess();
                 sfx.bassDrop();
                 triggerRumble(200);
-                triggerFlash("HIT");
-                triggerCombatPopup("LASER EVADED! +150", true, false);
+                triggerFlashRef.current("HIT");
+                triggerCombatPopupRef.current("LASER EVADED! +150", true, false);
                 spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "PARRIED +150", "#10b981");
                 setBossHp((prev) => Math.max(0, prev - 150));
                 setOverdriveGauge((prev) => Math.min(100, prev + 25));
@@ -2276,12 +2420,12 @@ export default function Home() {
                 sfx.penalty();
                 sfx.glitchWarning();
                 triggerRumble(350);
-                triggerFlash("PENALTY");
+                triggerFlashRef.current("PENALTY");
                 spawnFloatingText(curJointRef.current.x, curJointRef.current.y, "-30 LASER HIT", "#ef4444");
                 setGame((prev) => {
                   const nextHp = Math.max(0, prev.playerHp - 30);
                   if (nextHp <= 0) {
-                    finishMatch("DEFEAT");
+                    finishMatchRef.current("DEFEAT");
                     sfx.defeat();
                     coachSpeak("Laser strike fatal. Reboot arena.");
                   }
@@ -2312,9 +2456,9 @@ export default function Home() {
             isSync,
             comboStreakRef.current,
             spiritBombProgressRef.current,
-            bossHpRef.current <= currentBoss.hp * 0.4 && bossHpRef.current > 0,
-            isClashActive,
-            clashProgress
+            bossHpRef.current <= currentBossRef.current.hp * 0.4 && bossHpRef.current > 0,
+            isClashActiveRef.current,
+            clashProgressRef.current
           );
         }
       }
@@ -2325,37 +2469,65 @@ export default function Home() {
 
     const startCamera = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
-        if (!isRunning) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
+        let stream = streamRef.current;
+        if (!stream) {
+          setCameraStatus("INITIALIZING");
+          setCameraError(null);
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+              audio: false,
+            });
+          } catch {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          }
+          if (!isRunning) {
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          streamRef.current = stream;
         }
         localStream = stream;
 
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
-            if (!isRunning) return;
-            videoRef.current?.play().catch(console.error);
-
-            const processFrame = async () => {
-              if (!isRunning) return;
-              if (videoRef.current && videoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-                try {
-                  await pose.send({ image: videoRef.current });
-                } catch (err) {
-                  console.error("Frame error:", err);
-                }
-              }
-              if (isRunning) {
-                animationFrameId.current = requestAnimationFrame(processFrame);
-              }
-            };
-            processFrame();
-          };
+          if (videoRef.current.srcObject !== stream) {
+            videoRef.current.srcObject = stream;
+          }
+          try {
+            await videoRef.current.play();
+          } catch (e) {
+            console.warn("Video play error:", e);
+          }
         }
-      } catch (err) {
+
+        setCameraStatus("ACTIVE");
+
+        let isProcessing = false;
+        const processFrame = async () => {
+          if (!isRunning) return;
+          if (
+            videoRef.current &&
+            videoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+            !isProcessing
+          ) {
+            isProcessing = true;
+            try {
+              await pose.send({ image: videoRef.current });
+            } catch (err) {
+              console.error("Frame error:", err);
+            } finally {
+              isProcessing = false;
+            }
+          }
+          if (isRunning) {
+            animationFrameId.current = requestAnimationFrame(processFrame);
+          }
+        };
+        processFrame();
+      } catch (err: unknown) {
         console.error("Camera access failed:", err);
+        setCameraStatus("ERROR");
+        setCameraError(err instanceof Error ? err.message : "Camera access denied or device busy");
       }
     };
 
@@ -2364,16 +2536,19 @@ export default function Home() {
     return () => {
       isRunning = false;
       if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
-      if (localStream) localStream.getTracks().forEach((t) => t.stop());
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+      }
+      streamRef.current = null;
       try { pose.close(); } catch { /* noop */ }
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
     };
-  }, [scriptReady, triggerFlash, triggerCombatPopup, fireOverdriveBeam, startCalibration, finishMatch, isClashActive, clashProgress, currentBoss, profile.streak, triggerBossDialogue]);
+  }, [scriptReady]);
 
   const isEgoLift = game.engine.status === "penalty" || game.engine.phase === "STUNNED";
   const isCriticalHit = game.engine.status === "hit" || game.engine.status === "CRITICAL HIT!" || Boolean(game.engine.damage > 0);
   const isHolding = game.engine.phase.includes("HOLD") || game.engine.phase === "LOCKOUT";
-  const isBossEnraged = bossHp <= currentBoss.hp * 0.4 && bossHp > 0;
+  const isBossEnraged = bossHp <= currentBossRef.current.hp * 0.4 && bossHp > 0;
   const isBossDefeated = bossHp <= 0;
 
   const exercises = [
@@ -2466,7 +2641,7 @@ export default function Home() {
           <div className="hidden md:flex items-center gap-2 font-mono text-xs">
             <div className="bg-amber-950/80 border border-amber-500/40 text-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1 font-bold">
               <span>🔥</span>
-              <span>{profile.streak}d Streak</span>
+              <span>{profileRef.current.streak}d Streak</span>
             </div>
             <div className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 px-2.5 py-1 rounded-lg font-bold">
               ⚡ {profile.bioCredits} Credits
@@ -2477,8 +2652,7 @@ export default function Home() {
         {/* ----------------------------------------------------------------- */}
         {/* VIEW 1: ARENA (Combat Simulation & Biomechanical Telemetry)       */}
         {/* ----------------------------------------------------------------- */}
-        {currentView === "ARENA" && (
-          <section className="w-full max-w-5xl flex flex-col items-center animate-fadeIn">
+        <section className={`w-full max-w-5xl flex flex-col items-center animate-fadeIn ${currentView === "ARENA" ? "flex" : "hidden"}`}>
             
             {/* BOSS SELECTION BAR */}
             <div className="w-full mb-3 flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 border border-slate-800 p-2.5 rounded-xl text-xs font-mono">
@@ -2553,7 +2727,7 @@ export default function Home() {
                       ⚡ OVERDRIVE: {overdriveGauge}%
                       {overdriveGauge >= 100 && <span className="ml-1 text-yellow-300 animate-pulse">(READY!)</span>}
                     </span>
-                    <span className="text-slate-400">Streak +{Math.min(50, profile.streak * 10)}% DMG</span>
+                    <span className="text-slate-400">Streak +{Math.min(50, profileRef.current.streak * 10)}% DMG</span>
                   </div>
                 </div>
 
@@ -2607,7 +2781,7 @@ export default function Home() {
                     <span className="font-bold text-purple-400 flex items-center gap-1.5">
                       {currentBoss.avatar} {currentBoss.name}
                     </span>
-                    <span className="font-bold text-white">{bossHp} / {currentBoss.hp} HP</span>
+                    <span className="font-bold text-white">{bossHp} / {currentBossRef.current.hp} HP</span>
                   </div>
 
                   <div className="w-full bg-slate-950 h-4 rounded-lg overflow-hidden border border-slate-800 relative">
@@ -2617,7 +2791,7 @@ export default function Home() {
                           ? "bg-gradient-to-r from-red-600 via-rose-500 to-purple-600 animate-pulse"
                           : `bg-gradient-to-r ${currentBoss.color}`
                       }`}
-                      style={{ width: `${Math.max(0, Math.min(100, (bossHp / currentBoss.hp) * 100))}%` }}
+                      style={{ width: `${Math.max(0, Math.min(100, (bossHp / currentBossRef.current.hp) * 100))}%` }}
                     />
                   </div>
 
@@ -2742,14 +2916,40 @@ export default function Home() {
                 autoPlay
                 playsInline
                 muted
-                className="absolute inset-0 w-full h-full object-cover scale-x-[-1]"
+                className="absolute inset-0 w-full h-full object-cover scale-x-[-1] z-0"
               />
               <canvas
                 ref={canvasRef}
                 width={640}
                 height={480}
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none scale-x-[-1]"
+                className="absolute inset-0 w-full h-full object-cover pointer-events-none scale-x-[-1] z-10"
               />
+
+              {/* Camera Status & Reconnect Overlay (Non-blocking, zero pitch-black obstruction) */}
+              {cameraStatus === "ERROR" && (
+                <div className="absolute inset-0 z-40 bg-slate-950/92 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
+                  <div className="text-3xl mb-2 animate-bounce">📹⚠️</div>
+                  <div className="text-rose-400 font-mono font-bold text-sm mb-1 tracking-wider">OPTICAL SENSOR OFFLINE</div>
+                  <div className="text-slate-400 font-mono text-xs max-w-sm mb-4">
+                    {cameraError || "Camera access was denied or device is occupied by another application."}
+                  </div>
+                  <button
+                    onClick={restartCamera}
+                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-mono font-bold text-xs shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all cursor-pointer flex items-center gap-2"
+                  >
+                    <span>⚡</span> RECONNECT OPTICAL SENSOR
+                  </button>
+                </div>
+              )}
+
+              {cameraStatus === "INITIALIZING" && (
+                <div className="absolute top-4 left-4 z-30 bg-slate-950/85 border border-cyan-500/40 px-3 py-1.5 rounded-lg backdrop-blur-sm flex items-center gap-2 pointer-events-none shadow-[0_0_15px_rgba(6,182,212,0.3)]">
+                  <div className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-cyan-300 font-mono font-bold text-[11px] tracking-wider animate-pulse">
+                    SYNCHRONIZING OPTICAL SENSOR...
+                  </span>
+                </div>
+              )}
 
               <div className="absolute top-2.5 left-2.5 w-3.5 h-3.5 border-t-2 border-l-2 border-cyan-400 pointer-events-none z-20" />
               <div className="absolute top-2.5 right-2.5 w-3.5 h-3.5 border-t-2 border-r-2 border-cyan-400 pointer-events-none z-20" />
@@ -2862,7 +3062,6 @@ export default function Home() {
             </div>
 
           </section>
-        )}
 
         {/* ----------------------------------------------------------------- */}
         {/* VIEW 2: PROFILE & ACHIEVEMENTS VIEW                               */}
@@ -2890,7 +3089,7 @@ export default function Home() {
                 <div className="flex items-center gap-3 font-mono text-center">
                   <div className="bg-slate-950/80 border border-slate-800 px-4 py-2 rounded-xl">
                     <div className="text-xs text-slate-400">STREAK</div>
-                    <div className="text-xl font-black text-amber-400">🔥 {profile.streak} Days</div>
+                    <div className="text-xl font-black text-amber-400">🔥 {profileRef.current.streak} Days</div>
                   </div>
                   <div className="bg-slate-950/80 border border-slate-800 px-4 py-2 rounded-xl">
                     <div className="text-xs text-slate-400">CREDITS</div>
@@ -3020,7 +3219,7 @@ export default function Home() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Daily Streak Status:</span>
-                <span className="font-bold text-amber-400">🔥 {profile.streak} Days Active</span>
+                <span className="font-bold text-amber-400">🔥 {profileRef.current.streak} Days Active</span>
               </div>
             </div>
           </section>
