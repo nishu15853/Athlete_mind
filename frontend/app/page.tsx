@@ -15,6 +15,138 @@ declare global {
 
 type ExerciseType = "squats" | "pushups" | "overhead_press" | "rdl";
 type DifficultyType = "rehab" | "standard" | "athlete";
+type SkeletalShader = "cyberpunk" | "molten_core" | "void_phantom";
+type Soundpack = "arcade_synth" | "heavy_mecha";
+type WireframeTheme = "cyan" | "emerald" | "violet" | "amber";
+
+interface VaultData {
+  energyCores: number;
+  unlockedShaders: SkeletalShader[];
+  unlockedSoundpacks: Soundpack[];
+  activeShader: SkeletalShader;
+  activeSoundpack: Soundpack;
+  activeTheme: WireframeTheme;
+}
+
+interface LeaderboardEntry {
+  rank: number;
+  id: number;
+  operator_name: string;
+  boss_clear_time_sec: number;
+  form_purity_score: number;
+  total_tension_time_sec: number;
+  bounty_score: number;
+  purity_grade: "S" | "A" | "B";
+  timestamp: string;
+}
+
+const DEFAULT_VAULT: VaultData = {
+  energyCores: 100,
+  unlockedShaders: ["cyberpunk"],
+  unlockedSoundpacks: ["arcade_synth"],
+  activeShader: "cyberpunk",
+  activeSoundpack: "arcade_synth",
+  activeTheme: "cyan",
+};
+
+const SHADER_CONFIGS: Record<
+  SkeletalShader,
+  {
+    name: string;
+    cost: number;
+    baseColor: string;
+    holdingColor: string;
+    targetColor: string;
+    bracketColor: string;
+    glowColor: string;
+    description: string;
+    badgeStyle: string;
+  }
+> = {
+  cyberpunk: {
+    name: "CYBERPUNK STANDARD",
+    cost: 0,
+    baseColor: "#00f0ff",
+    holdingColor: "#ffd700",
+    targetColor: "#10b981",
+    bracketColor: "rgba(0, 240, 255, 0.4)",
+    glowColor: "#00f0ff",
+    description: "High-contrast neon cyan with emerald target lock and golden holding arc.",
+    badgeStyle: "border-cyan-500/40 text-cyan-300 bg-cyan-950/60",
+  },
+  molten_core: {
+    name: "MOLTEN CORE",
+    cost: 150,
+    baseColor: "#ff7700",
+    holdingColor: "#ffaa00",
+    targetColor: "#ff2200",
+    bracketColor: "rgba(255, 119, 0, 0.5)",
+    glowColor: "#ff5500",
+    description: "Thermal reactor amber and molten red heat signatures for high-intensity reps.",
+    badgeStyle: "border-amber-500/40 text-amber-300 bg-amber-950/60",
+  },
+  void_phantom: {
+    name: "VOID PHANTOM",
+    cost: 300,
+    baseColor: "#a855f7",
+    holdingColor: "#d946ef",
+    targetColor: "#ec4899",
+    bracketColor: "rgba(168, 85, 247, 0.5)",
+    glowColor: "#a855f7",
+    description: "Ethereal dark violet and quantum fuchsia spectral resonance.",
+    badgeStyle: "border-purple-500/40 text-purple-300 bg-purple-950/60",
+  },
+};
+
+const THEME_STYLES: Record<
+  WireframeTheme,
+  {
+    name: string;
+    headerBorder: string;
+    primaryText: string;
+    badgeBg: string;
+    hudBorder: string;
+    glowClass: string;
+    buttonBg: string;
+  }
+> = {
+  cyan: {
+    name: "NEON CYAN",
+    headerBorder: "border-cyan-500/20",
+    primaryText: "text-cyan-400",
+    badgeBg: "bg-cyan-950/80 border-cyan-500/40 text-cyan-300",
+    hudBorder: "border-cyan-500/30",
+    glowClass: "shadow-[0_0_15px_rgba(0,240,255,0.15)]",
+    buttonBg: "bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]",
+  },
+  emerald: {
+    name: "BIO EMERALD",
+    headerBorder: "border-emerald-500/20",
+    primaryText: "text-emerald-400",
+    badgeBg: "bg-emerald-950/80 border-emerald-500/40 text-emerald-300",
+    hudBorder: "border-emerald-500/30",
+    glowClass: "shadow-[0_0_15px_rgba(16,185,129,0.15)]",
+    buttonBg: "bg-emerald-500 text-black shadow-[0_0_12px_rgba(16,185,129,0.6)]",
+  },
+  violet: {
+    name: "CYBER VIOLET",
+    headerBorder: "border-purple-500/20",
+    primaryText: "text-purple-400",
+    badgeBg: "bg-purple-950/80 border-purple-500/40 text-purple-300",
+    hudBorder: "border-purple-500/30",
+    glowClass: "shadow-[0_0_15px_rgba(168,85,247,0.15)]",
+    buttonBg: "bg-purple-500 text-black shadow-[0_0_12px_rgba(168,85,247,0.6)]",
+  },
+  amber: {
+    name: "TACTICAL AMBER",
+    headerBorder: "border-amber-500/20",
+    primaryText: "text-amber-400",
+    badgeBg: "bg-amber-950/80 border-amber-500/40 text-amber-300",
+    hudBorder: "border-amber-500/30",
+    glowClass: "shadow-[0_0_15px_rgba(245,158,11,0.15)]",
+    buttonBg: "bg-amber-500 text-black shadow-[0_0_12px_rgba(245,158,11,0.6)]",
+  },
+};
 
 interface BioEnginePacket {
   event?: string;
@@ -62,6 +194,8 @@ interface BioEnginePacket {
   streak_collapsed?: boolean;
   combat_damage_dealt?: number;
   combat_damage_taken?: number;
+  modifiers?: string[];
+  total_tension_time_sec?: number;
 }
 
 interface AngleSample {
@@ -111,6 +245,7 @@ interface FloatingText {
 class AudioSynth {
   private ctx: AudioContext | null = null;
   public muted: boolean = false;
+  public soundpack: Soundpack = "arcade_synth";
 
   private init() {
     if (!this.ctx && typeof window !== "undefined") {
@@ -129,19 +264,33 @@ class AudioSynth {
     try {
       this.init();
       if (!this.ctx) return;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sine";
-      const baseFreq = 320 + Math.min(1.0, progress) * 480;
-      osc.frequency.setValueAtTime(baseFreq, this.ctx.currentTime);
-
-      gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start();
-      osc.stop(this.ctx.currentTime + 0.08);
+      const now = this.ctx.currentTime;
+      if (this.soundpack === "heavy_mecha") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "triangle";
+        const baseFreq = 140 + Math.min(1.0, progress) * 180;
+        osc.frequency.setValueAtTime(baseFreq, now);
+        osc.frequency.exponentialRampToValueAtTime(70, now + 0.07);
+        gain.gain.setValueAtTime(0.06, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.07);
+      } else {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        const baseFreq = 320 + Math.min(1.0, progress) * 480;
+        osc.frequency.setValueAtTime(baseFreq, now);
+        gain.gain.setValueAtTime(0.04, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      }
     } catch {
       // safe
     }
@@ -153,32 +302,59 @@ class AudioSynth {
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
+      if (this.soundpack === "heavy_mecha") {
+        // Heavy sub-bass thud (45-85Hz)
+        const sub = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        sub.type = "sawtooth";
+        sub.frequency.setValueAtTime(85, now);
+        sub.frequency.exponentialRampToValueAtTime(35, now + 0.4);
+        subGain.gain.setValueAtTime(0.45, now);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        sub.connect(subGain);
+        subGain.connect(this.ctx.destination);
+        sub.start(now);
+        sub.stop(now + 0.4);
 
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(240, now);
-      osc.frequency.exponentialRampToValueAtTime(45, now + 0.35);
+        // Metallic impact clang
+        const clang = this.ctx.createOscillator();
+        const clangGain = this.ctx.createGain();
+        clang.type = "square";
+        clang.frequency.setValueAtTime(520, now);
+        clang.frequency.exponentialRampToValueAtTime(220, now + 0.22);
+        clangGain.gain.setValueAtTime(0.25, now);
+        clangGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+        clang.connect(clangGain);
+        clangGain.connect(this.ctx.destination);
+        clang.start(now);
+        clang.stop(now + 0.22);
+      } else {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(240, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.35);
 
-      gain.gain.setValueAtTime(0.35, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.35);
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.35);
 
-      const ping = this.ctx.createOscillator();
-      const pingGain = this.ctx.createGain();
-      ping.type = "sine";
-      ping.frequency.setValueAtTime(880, now);
-      ping.frequency.exponentialRampToValueAtTime(1760, now + 0.18);
+        const ping = this.ctx.createOscillator();
+        const pingGain = this.ctx.createGain();
+        ping.type = "sine";
+        ping.frequency.setValueAtTime(880, now);
+        ping.frequency.exponentialRampToValueAtTime(1760, now + 0.18);
 
-      pingGain.gain.setValueAtTime(0.2, now);
-      pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-      ping.connect(pingGain);
-      pingGain.connect(this.ctx.destination);
-      ping.start(now);
-      ping.stop(now + 0.18);
+        pingGain.gain.setValueAtTime(0.2, now);
+        pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+        ping.connect(pingGain);
+        pingGain.connect(this.ctx.destination);
+        ping.start(now);
+        ping.stop(now + 0.18);
+      }
     } catch {
       // safe
     }
@@ -190,19 +366,33 @@ class AudioSynth {
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(110, now);
-      osc.frequency.setValueAtTime(75, now + 0.18);
+      if (this.soundpack === "heavy_mecha") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(60, now);
+        osc.frequency.exponentialRampToValueAtTime(28, now + 0.45);
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.45);
+      } else {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(110, now);
+        osc.frequency.setValueAtTime(75, now + 0.18);
 
-      gain.gain.setValueAtTime(0.3, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
 
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.45);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.45);
+      }
     } catch {
       // safe
     }
@@ -214,18 +404,32 @@ class AudioSynth {
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "square";
-      osc.frequency.setValueAtTime(160, now);
-      osc.frequency.exponentialRampToValueAtTime(30, now + 0.5);
+      if (this.soundpack === "heavy_mecha") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(90, now);
+        osc.frequency.exponentialRampToValueAtTime(25, now + 0.55);
+        gain.gain.setValueAtTime(0.45, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.55);
+      } else {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.exponentialRampToValueAtTime(30, now + 0.5);
 
-      gain.gain.setValueAtTime(0.4, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.5);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      }
     } catch {
       // safe
     }
@@ -285,31 +489,59 @@ class AudioSynth {
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      // Metallic clash primary
-      const osc1 = this.ctx.createOscillator();
-      const gain1 = this.ctx.createGain();
-      osc1.type = "triangle";
-      osc1.frequency.setValueAtTime(1200, now);
-      osc1.frequency.exponentialRampToValueAtTime(750, now + 0.3);
-      gain1.gain.setValueAtTime(0.4, now);
-      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-      osc1.connect(gain1);
-      gain1.connect(this.ctx.destination);
-      osc1.start(now);
-      osc1.stop(now + 0.35);
+      if (this.soundpack === "heavy_mecha") {
+        // Resonant industrial anvil clash
+        const clang = this.ctx.createOscillator();
+        const clangGain = this.ctx.createGain();
+        clang.type = "square";
+        clang.frequency.setValueAtTime(680, now);
+        clang.frequency.exponentialRampToValueAtTime(340, now + 0.35);
+        clangGain.gain.setValueAtTime(0.4, now);
+        clangGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        clang.connect(clangGain);
+        clangGain.connect(this.ctx.destination);
+        clang.start(now);
+        clang.stop(now + 0.35);
 
-      // High metallic sheen
-      const osc2 = this.ctx.createOscillator();
-      const gain2 = this.ctx.createGain();
-      osc2.type = "sine";
-      osc2.frequency.setValueAtTime(2400, now);
-      osc2.frequency.exponentialRampToValueAtTime(1600, now + 0.25);
-      gain2.gain.setValueAtTime(0.25, now);
-      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-      osc2.connect(gain2);
-      gain2.connect(this.ctx.destination);
-      osc2.start(now);
-      osc2.stop(now + 0.25);
+        // Sub recoil pulse
+        const sub = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        sub.type = "sine";
+        sub.frequency.setValueAtTime(75, now);
+        sub.frequency.exponentialRampToValueAtTime(40, now + 0.25);
+        subGain.gain.setValueAtTime(0.35, now);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        sub.connect(subGain);
+        subGain.connect(this.ctx.destination);
+        sub.start(now);
+        sub.stop(now + 0.25);
+      } else {
+        // Metallic clash primary
+        const osc1 = this.ctx.createOscillator();
+        const gain1 = this.ctx.createGain();
+        osc1.type = "triangle";
+        osc1.frequency.setValueAtTime(1200, now);
+        osc1.frequency.exponentialRampToValueAtTime(750, now + 0.3);
+        gain1.gain.setValueAtTime(0.4, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc1.connect(gain1);
+        gain1.connect(this.ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.35);
+
+        // High metallic sheen
+        const osc2 = this.ctx.createOscillator();
+        const gain2 = this.ctx.createGain();
+        osc2.type = "sine";
+        osc2.frequency.setValueAtTime(2400, now);
+        osc2.frequency.exponentialRampToValueAtTime(1600, now + 0.25);
+        gain2.gain.setValueAtTime(0.25, now);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        osc2.connect(gain2);
+        gain2.connect(this.ctx.destination);
+        osc2.start(now);
+        osc2.stop(now + 0.25);
+      }
     } catch {
       // safe
     }
@@ -404,6 +636,7 @@ export default function AthleteMindPage() {
   // Combat State
   const [playerHp, setPlayerHp] = useState(100);
   const [bossHp, setBossHp] = useState(500);
+  const [bossMaxHp, setBossMaxHp] = useState(500);
   const [bossAttackTimer, setBossAttackTimer] = useState(10.0);
   const [overheatMeter, setOverheatMeter] = useState(0);
   const [stunTimer, setStunTimer] = useState(0);
@@ -417,7 +650,7 @@ export default function AthleteMindPage() {
   const [parryWindowSec, setParryWindowSec] = useState(0.0);
   const [screenGlitch, setScreenGlitch] = useState(false);
 
-  const isEnraged = bossState === "ENRAGED" || (bossHp > 0 && bossHp <= 250);
+  const isEnraged = bossState === "ENRAGED" || (bossHp > 0 && bossHp <= bossMaxHp * 0.5);
 
   // Kinematics & Metrics
   const [repCount, setRepCount] = useState(0);
@@ -442,6 +675,23 @@ export default function AthleteMindPage() {
   const [postureFaultsCount, setPostureFaultsCount] = useState(0);
   const [minSessionAngle, setMinSessionAngle] = useState(180);
   const [holdDurations, setHoldDurations] = useState<number[]>([]);
+
+  // Phase 7: Loadout Vault & Customization
+  const [vault, setVault] = useState<VaultData>(DEFAULT_VAULT);
+  const [showVaultModal, setShowVaultModal] = useState(false);
+  const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
+  const [earnedCoresNotice, setEarnedCoresNotice] = useState<number | null>(null);
+
+  // Phase 7: Progressive Encounter Modifiers (Mutators)
+  const [modifiers, setModifiers] = useState<string[]>([]);
+  const modifiersRef = useRef<string[]>([]);
+
+  // Phase 7: Global Bounty Leaderboard & Tension Telemetry
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [callsign, setCallsign] = useState("OPERATOR_01");
+  const [isSubmittingLeaderboard, setIsSubmittingLeaderboard] = useState(false);
+  const [leaderboardStatus, setLeaderboardStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [totalTensionTimeSec, setTotalTensionTimeSec] = useState(0);
 
   // DOM References
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -470,6 +720,8 @@ export default function AthleteMindPage() {
   const faultJointIndicesRef = useRef<number[]>([]);
   const exerciseRef = useRef<ExerciseType>("squats");
   const difficultyRef = useRef<DifficultyType>("standard");
+  const activeShaderRef = useRef<SkeletalShader>("cyberpunk");
+  const vaultRef = useRef<VaultData>(DEFAULT_VAULT);
 
   useEffect(() => {
     isEnragedRef.current = isEnraged;
@@ -482,6 +734,184 @@ export default function AthleteMindPage() {
   useEffect(() => {
     difficultyRef.current = difficulty;
   }, [difficulty]);
+
+  useEffect(() => {
+    modifiersRef.current = modifiers;
+  }, [modifiers]);
+
+  // Load vault & callsign on mount
+  useEffect(() => {
+    try {
+      const savedVault = localStorage.getItem("athletemind_vault");
+      if (savedVault) {
+        const parsed: VaultData = JSON.parse(savedVault);
+        setVault((prev) => ({ ...prev, ...parsed }));
+        vaultRef.current = { ...DEFAULT_VAULT, ...parsed };
+        if (parsed.activeSoundpack) {
+          synth.soundpack = parsed.activeSoundpack;
+        }
+        if (parsed.activeShader) {
+          activeShaderRef.current = parsed.activeShader;
+        }
+      }
+      const savedCallsign = localStorage.getItem("athletemind_callsign");
+      if (savedCallsign) setCallsign(savedCallsign);
+    } catch {}
+  }, []);
+
+  const updateVault = useCallback((newVault: VaultData) => {
+    setVault(newVault);
+    vaultRef.current = newVault;
+    activeShaderRef.current = newVault.activeShader;
+    synth.soundpack = newVault.activeSoundpack;
+    try {
+      localStorage.setItem("athletemind_vault", JSON.stringify(newVault));
+    } catch {}
+  }, []);
+
+  const fetchLeaderboard = useCallback(() => {
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/pose";
+    const httpUrl = wsUrl.replace(/^wss?:/, (m) => (m === "wss:" ? "https:" : "http:")).replace(/\/ws\/pose$/, "");
+    fetch(`${httpUrl}/api/leaderboard`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.leaderboard)) {
+          setLeaderboard(data.leaderboard);
+        }
+      })
+      .catch((err) => console.warn("Leaderboard fetch error:", err));
+  }, []);
+
+  useEffect(() => {
+    fetchLeaderboard();
+  }, [fetchLeaderboard]);
+
+  const handleBuyOrEquipShader = (shaderKey: SkeletalShader) => {
+    const current = vaultRef.current;
+    if (current.unlockedShaders.includes(shaderKey)) {
+      updateVault({ ...current, activeShader: shaderKey });
+      speakCoachCue(`${SHADER_CONFIGS[shaderKey].name} shader activated`);
+      return;
+    }
+    const cost = SHADER_CONFIGS[shaderKey].cost;
+    if (current.energyCores >= cost) {
+      updateVault({
+        ...current,
+        energyCores: current.energyCores - cost,
+        unlockedShaders: [...current.unlockedShaders, shaderKey],
+        activeShader: shaderKey,
+      });
+      speakCoachCue(`${SHADER_CONFIGS[shaderKey].name} unlocked and equipped`);
+    } else {
+      speakCoachCue("Insufficient energy cores");
+    }
+  };
+
+  const handleBuyOrEquipSoundpack = (soundKey: Soundpack) => {
+    const current = vaultRef.current;
+    if (current.unlockedSoundpacks.includes(soundKey)) {
+      updateVault({ ...current, activeSoundpack: soundKey });
+      speakCoachCue(`${soundKey.replace("_", " ")} soundpack equipped`);
+      return;
+    }
+    const cost = soundKey === "heavy_mecha" ? 200 : 0;
+    if (current.energyCores >= cost) {
+      updateVault({
+        ...current,
+        energyCores: current.energyCores - cost,
+        unlockedSoundpacks: [...current.unlockedSoundpacks, soundKey],
+        activeSoundpack: soundKey,
+      });
+      speakCoachCue("Heavy mecha soundpack unlocked and equipped");
+    } else {
+      speakCoachCue("Insufficient energy cores");
+    }
+  };
+
+  const handleSelectTheme = (themeKey: WireframeTheme) => {
+    const current = vaultRef.current;
+    updateVault({ ...current, activeTheme: themeKey });
+    speakCoachCue(`${THEME_STYLES[themeKey].name} theme engaged`);
+  };
+
+  const handleToggleModifier = (mod: string) => {
+    setModifiers((prev) => {
+      const next = prev.includes(mod) ? prev.filter((m) => m !== mod) : [...prev, mod];
+      modifiersRef.current = next;
+
+      // Update boss HP if ENDURANCE_GAUNTLET
+      const maxHp = next.includes("ENDURANCE_GAUNTLET") ? 1000 : 500;
+      setBossMaxHp(maxHp);
+      if (next.includes("ENDURANCE_GAUNTLET") && bossHp <= 500) {
+        setBossHp(1000);
+      } else if (!next.includes("ENDURANCE_GAUNTLET") && bossHp > 500) {
+        setBossHp(500);
+      }
+
+      // Update hold target duration if HYPER_TENSION
+      if (next.includes("HYPER_TENSION")) {
+        setTargetHoldDuration(3.0);
+      } else {
+        setTargetHoldDuration(difficultyRef.current === "rehab" ? 1.0 : difficultyRef.current === "athlete" ? 2.0 : 1.5);
+      }
+
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(
+          JSON.stringify({
+            action: "set_exercise",
+            exercise_type: exerciseRef.current,
+            difficulty: difficultyRef.current,
+            modifiers: next,
+          })
+        );
+      }
+      speakCoachCue(`Modifier ${mod.replace("_", " ")} ${next.includes(mod) ? "engaged" : "disengaged"}`);
+      return next;
+    });
+  };
+
+  const handleSubmitLeaderboard = async () => {
+    if (!callsign.trim()) return;
+    setIsSubmittingLeaderboard(true);
+    setLeaderboardStatus(null);
+    try {
+      localStorage.setItem("athletemind_callsign", callsign.trim().toUpperCase());
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/pose";
+      const httpUrl = wsUrl.replace(/^wss?:/, (m) => (m === "wss:" ? "https:" : "http:")).replace(/\/ws\/pose$/, "");
+      const durationSec = Number(((Date.now() - battleStartTime) / 1000).toFixed(1));
+
+      const res = await fetch(`${httpUrl}/api/leaderboard/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operator_name: callsign.trim().toUpperCase(),
+          boss_clear_time_sec: durationSec,
+          form_purity_score: formPurity,
+          total_tension_time_sec: Number(totalTensionTimeSec.toFixed(1)),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLeaderboardStatus({
+          type: "error",
+          msg: data.detail || "DISQUALIFIED: Form Purity < 70% threshold required for leaderboard ranking.",
+        });
+      } else {
+        setLeaderboardStatus({
+          type: "success",
+          msg: `TRANSMITTED! Rank #${data.rank} • Bounty Score: ${data.entry.bounty_score} [Grade ${data.entry.purity_grade}]`,
+        });
+        fetchLeaderboard();
+      }
+    } catch {
+      setLeaderboardStatus({
+        type: "error",
+        msg: "Failed to connect to Leaderboard Telemetry Matrix.",
+      });
+    } finally {
+      setIsSubmittingLeaderboard(false);
+    }
+  };
 
   // Real-Time Audio Biomechanical Coach (Browser SpeechSynthesis API with 3s cooldown)
   const speakCoachCue = useCallback((cue: string) => {
@@ -566,6 +996,7 @@ export default function AthleteMindPage() {
           action: "set_exercise",
           exercise_type: newEx,
           difficulty: difficultyRef.current,
+          modifiers: modifiersRef.current,
         })
       );
     }
@@ -576,13 +1007,18 @@ export default function AthleteMindPage() {
   const handleSelectDifficulty = (newDiff: DifficultyType) => {
     setDifficulty(newDiff);
     difficultyRef.current = newDiff;
-    setTargetHoldDuration(newDiff === "rehab" ? 1.0 : newDiff === "athlete" ? 2.0 : 1.5);
+    if (modifiersRef.current.includes("HYPER_TENSION")) {
+      setTargetHoldDuration(3.0);
+    } else {
+      setTargetHoldDuration(newDiff === "rehab" ? 1.0 : newDiff === "athlete" ? 2.0 : 1.5);
+    }
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({
           action: "set_exercise",
           exercise_type: exerciseRef.current,
           difficulty: newDiff,
+          modifiers: modifiersRef.current,
         })
       );
     }
@@ -591,8 +1027,10 @@ export default function AthleteMindPage() {
 
   // Reset Session
   const handleResetCombat = useCallback(() => {
+    const targetMaxHp = modifiersRef.current.includes("ENDURANCE_GAUNTLET") ? 1000 : 500;
     setPlayerHp(100);
-    setBossHp(500);
+    setBossMaxHp(targetMaxHp);
+    setBossHp(targetMaxHp);
     setOverheatMeter(0);
     setStunTimer(0);
     setIsStunned(false);
@@ -614,6 +1052,9 @@ export default function AthleteMindPage() {
     setAngleTrace([]);
     setRepDetails([]);
     setHoldDurations([]);
+    setTotalTensionTimeSec(0);
+    setEarnedCoresNotice(null);
+    setLeaderboardStatus(null);
 
     primaryAngleRef.current = 180;
     holdProgressRef.current = 0;
@@ -751,13 +1192,24 @@ export default function AthleteMindPage() {
       setShowClinicianModal(true);
       synth.playVictory();
       speakCoachCue("Target destroyed! Outstanding biomechanical execution!");
+
+      // Phase 7: Award Energy Cores (50 + +1 per % purity over 80%)
+      const bonus = Math.max(0, Math.round(formPurity - 80));
+      const earned = 50 + bonus;
+      setEarnedCoresNotice(earned);
+      const currentVault = vaultRef.current;
+      updateVault({
+        ...currentVault,
+        energyCores: currentVault.energyCores + earned,
+      });
+      fetchLeaderboard();
     } else if (playerHp <= 0 && matchStatus === "ACTIVE") {
       setMatchStatus("DEFEAT");
       setShowClinicianModal(true);
       synth.playDefeat();
       speakCoachCue("Mission failed. Recover and retry.");
     }
-  }, [bossHp, playerHp, matchStatus, speakCoachCue]);
+  }, [bossHp, playerHp, matchStatus, formPurity, speakCoachCue, updateVault, fetchLeaderboard]);
 
   // ---------------------------------------------------------------------------
   // Canvas Render Loop with Dynamic Color-Coded Kinematic Skeleton
@@ -809,8 +1261,9 @@ export default function AthleteMindPage() {
       ctx.fillText("TARGET ACQUISITION IN PROGRESS...", width / 2, height / 2);
     }
 
-    // 2. Corner Tech Brackets
-    ctx.strokeStyle = isEnragedRef.current ? "rgba(255, 0, 85, 0.6)" : "rgba(0, 240, 255, 0.4)";
+    // 2. Corner Tech Brackets (Dynamic Shader Color)
+    const currentShader = SHADER_CONFIGS[activeShaderRef.current] || SHADER_CONFIGS.cyberpunk;
+    ctx.strokeStyle = isEnragedRef.current ? "rgba(255, 0, 85, 0.6)" : currentShader.bracketColor;
     ctx.lineWidth = 2.5;
     const bSize = 22;
     ctx.beginPath();
@@ -871,9 +1324,9 @@ export default function AthleteMindPage() {
       const getBoneColor = (idx1: number, idx2: number) => {
         if (isStunnedRef.current) return "#ff0055";
         if (isFaultJoint(idx1, idx2)) return "#ff2a5f"; // Red / Yellow alert
-        if (holdProgressRef.current >= 1.0) return "#10b981"; // Neon Green for target met
-        if (holdProgressRef.current > 0) return "#ffd700"; // Gold holding
-        return "#00f0ff"; // Default cyan
+        if (holdProgressRef.current >= 1.0) return currentShader.targetColor;
+        if (holdProgressRef.current > 0) return currentShader.holdingColor;
+        return currentShader.baseColor;
       };
 
       const drawBone = (p1: any, p2: any, color: string, lineWidth = 3.5) => {
@@ -934,9 +1387,9 @@ export default function AthleteMindPage() {
           ? "#ff2a5f"
           : idx === activeJointIdxRef.current
           ? holdProgressRef.current >= 1.0
-            ? "#10b981"
-            : "#ffd700"
-          : "#00f0ff";
+            ? currentShader.targetColor
+            : currentShader.holdingColor
+          : currentShader.baseColor;
 
         ctx.save();
         ctx.beginPath();
@@ -970,9 +1423,9 @@ export default function AthleteMindPage() {
 
         ctx.beginPath();
         ctx.arc(targetJoint.x, targetJoint.y, radius, startAngle, endAngle);
-        ctx.strokeStyle = progress >= 1.0 ? "#10b981" : "#ffd700";
+        ctx.strokeStyle = progress >= 1.0 ? currentShader.targetColor : currentShader.holdingColor;
         ctx.lineWidth = 5.5;
-        ctx.shadowColor = progress >= 1.0 ? "#10b981" : "#ffd700";
+        ctx.shadowColor = progress >= 1.0 ? currentShader.targetColor : currentShader.holdingColor;
         ctx.shadowBlur = 14;
         ctx.stroke();
 
@@ -1076,6 +1529,7 @@ export default function AthleteMindPage() {
           const payload = {
             exercise_type: exerciseRef.current,
             difficulty: difficultyRef.current,
+            modifiers: modifiersRef.current,
             left: {
               shoulder: getCoord(11),
               elbow: getCoord(13),
@@ -1112,6 +1566,7 @@ export default function AthleteMindPage() {
           action: "set_exercise",
           exercise_type: exerciseRef.current,
           difficulty: difficultyRef.current,
+          modifiers: modifiersRef.current,
         })
       );
     };
@@ -1181,9 +1636,15 @@ export default function AthleteMindPage() {
           setFormPurity(Math.round(data.purity));
         }
 
-        // Phase 6 Boss Combat Synchronization
+        // Phase 6 & Phase 7 Boss Combat Synchronization
         if (data.boss_hp !== undefined) {
           setBossHp(data.boss_hp);
+        }
+        if (data.boss_max_hp !== undefined) {
+          setBossMaxHp(data.boss_max_hp);
+        }
+        if (data.total_tension_time_sec !== undefined) {
+          setTotalTensionTimeSec(data.total_tension_time_sec);
         }
         if (data.player_hp !== undefined) {
           setPlayerHp(data.player_hp);
@@ -1291,7 +1752,7 @@ export default function AthleteMindPage() {
           setCombatBannerType("CRIT");
 
           const dmg = data.damage || 100;
-          if (dmg > 0 && !data.parry_success) {
+          if (data.boss_hp === undefined && dmg > 0 && !data.parry_success) {
             synth.playCritHit();
             screenShakeRef.current = 16;
             setBossHp((prev) => Math.max(0, prev - dmg));
@@ -1475,155 +1936,192 @@ export default function AthleteMindPage() {
       <video ref={videoRef} className="hidden" playsInline muted autoPlay />
 
       {/* ------------------------------------------------------------------- */}
-      {/* 1. TOP BAR: DUAL COMBAT HUD & CLINICIAN SHORTCUT                   */}
+      {/* 1. TOP BAR: DUAL COMBAT HUD, VAULT & LEADERBOARD CONTROLS           */}
       {/* ------------------------------------------------------------------- */}
-      <header className="relative z-20 flex items-center justify-between px-6 py-2.5 bg-[#0a0f1d]/95 border-b border-cyan-500/20 backdrop-blur-md">
-        {/* Left: Pilot HP & Overheat */}
-        <div className="flex items-center gap-3.5 w-72">
-          <div className="w-10 h-10 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 text-lg shadow-[0_0_12px_rgba(6,182,212,0.3)]">
-            🛡️
-          </div>
-          <div className="flex-1">
-            <div className="flex justify-between text-xs font-bold tracking-wider text-cyan-300 mb-1">
-              <span>PILOT HP</span>
-              <span>{playerHp} / 100</span>
+      {(() => {
+        const theme = THEME_STYLES[vault.activeTheme] || THEME_STYLES.cyan;
+        return (
+          <header className={`relative z-20 flex items-center justify-between px-5 py-2.5 bg-[#0a0f1d]/95 border-b ${theme.headerBorder} backdrop-blur-md`}>
+            {/* Left: Pilot HP & Overheat */}
+            <div className="flex items-center gap-3 w-64">
+              <div className={`w-9 h-9 rounded-xl ${theme.badgeBg} flex items-center justify-center text-base ${theme.glowClass}`}>
+                🛡️
+              </div>
+              <div className="flex-1">
+                <div className={`flex justify-between text-xs font-bold tracking-wider ${theme.primaryText} mb-1`}>
+                  <span>PILOT HP</span>
+                  <span>{playerHp} / 100</span>
+                </div>
+                <div className="h-2.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-cyan-500/30 mb-1">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      playerHp > 40
+                        ? "bg-gradient-to-r from-cyan-500 to-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
+                        : "bg-gradient-to-r from-rose-600 to-amber-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.7)]"
+                    }`}
+                    style={{ width: `${Math.max(0, Math.min(100, playerHp))}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[9px] text-slate-400">
+                  <span>OVERHEAT</span>
+                  <span>{stunTimer > 0 ? `STUNNED (${stunTimer.toFixed(1)}s)` : `${Math.round(overheatMeter)}%`}</span>
+                </div>
+              </div>
             </div>
-            <div className="h-2.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-cyan-500/30 mb-1">
+
+            {/* Center: Live Telemetry */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className={`text-center px-3 py-1 rounded-xl bg-black/60 border ${theme.hudBorder} ${theme.glowClass}`}>
+                <div className={`text-[9px] ${theme.primaryText} font-semibold tracking-widest uppercase`}>Reps</div>
+                <div className={`text-2xl font-black ${theme.primaryText} font-mono tracking-tight`}>
+                  {repCount.toString().padStart(2, "0")}
+                </div>
+              </div>
+
+              <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-cyan-500/30">
+                <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">Purity</div>
+                <div className={`text-xl font-black ${purityColor} tracking-tight`}>
+                  {formPurity}%
+                </div>
+              </div>
+
+              {/* Kinetic Combo Multiplier Badge */}
               <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  playerHp > 40
-                    ? "bg-gradient-to-r from-cyan-500 to-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
-                    : "bg-gradient-to-r from-rose-600 to-amber-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.7)]"
+                className={`text-center px-3 py-1 rounded-xl border transition-all duration-300 ${
+                  comboMultiplier >= 3.0
+                    ? "bg-gradient-to-b from-rose-950/90 to-amber-950/90 border-amber-400 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.8)] animate-pulse"
+                    : comboMultiplier >= 2.0
+                    ? "bg-purple-950/80 border-fuchsia-400 text-fuchsia-300 shadow-[0_0_15px_rgba(217,70,239,0.5)]"
+                    : comboMultiplier >= 1.5
+                    ? "bg-amber-950/80 border-amber-500 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
+                    : "bg-black/60 border-slate-700/50 text-slate-400"
                 }`}
-                style={{ width: `${Math.max(0, Math.min(100, playerHp))}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[9px] text-slate-400">
-              <span>OVERHEAT</span>
-              <span>{stunTimer > 0 ? `STUNNED (${stunTimer.toFixed(1)}s)` : `${Math.round(overheatMeter)}%`}</span>
-            </div>
-          </div>
-        </div>
+              >
+                <div className="text-[9px] uppercase font-semibold tracking-widest flex items-center justify-center gap-1">
+                  <span>Streak</span>
+                  <span className="text-white font-mono font-bold">[{comboStreak}]</span>
+                </div>
+                <div className="text-sm font-black font-mono tracking-wider">
+                  {comboMultiplier >= 3.0
+                    ? "x3.0 HYPER"
+                    : comboMultiplier >= 2.0
+                    ? "x2.0 SURGE"
+                    : comboMultiplier >= 1.5
+                    ? "x1.5 COMBAT"
+                    : "x1.0 BASE"}
+                </div>
+              </div>
 
-        {/* Center: Live Telemetry */}
-        <div className="flex items-center gap-3">
-          <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
-            <div className="text-[9px] text-cyan-400 font-semibold tracking-widest uppercase">Reps</div>
-            <div className="text-2xl font-black text-cyan-300 font-mono tracking-tight">
-              {repCount.toString().padStart(2, "0")}
-            </div>
-          </div>
+              <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-slate-700/50">
+                <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">
+                  {primaryAngleName} / {secondaryAngleName}
+                </div>
+                <div className="text-sm font-bold text-slate-200 tracking-tight font-mono">
+                  {primaryAngle}° / {secondaryAngle}°
+                </div>
+              </div>
 
-          <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-cyan-500/30">
-            <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">Purity</div>
-            <div className={`text-xl font-black ${purityColor} tracking-tight`}>
-              {formPurity}%
-            </div>
-          </div>
-
-          {/* Kinetic Combo Multiplier Badge */}
-          <div
-            className={`text-center px-3 py-1 rounded-xl border transition-all duration-300 ${
-              comboMultiplier >= 3.0
-                ? "bg-gradient-to-b from-rose-950/90 to-amber-950/90 border-amber-400 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.8)] animate-pulse"
-                : comboMultiplier >= 2.0
-                ? "bg-purple-950/80 border-fuchsia-400 text-fuchsia-300 shadow-[0_0_15px_rgba(217,70,239,0.5)]"
-                : comboMultiplier >= 1.5
-                ? "bg-amber-950/80 border-amber-500 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
-                : "bg-black/60 border-slate-700/50 text-slate-400"
-            }`}
-          >
-            <div className="text-[9px] uppercase font-semibold tracking-widest flex items-center justify-center gap-1">
-              <span>Streak</span>
-              <span className="text-white font-mono font-bold">[{comboStreak}]</span>
-            </div>
-            <div className="text-sm font-black font-mono tracking-wider">
-              {comboMultiplier >= 3.0
-                ? "x3.0 HYPER"
-                : comboMultiplier >= 2.0
-                ? "x2.0 SURGE"
-                : comboMultiplier >= 1.5
-                ? "x1.5 COMBAT"
-                : "x1.0 BASE"}
-            </div>
-          </div>
-
-          <div className="text-center px-3 py-1 rounded-xl bg-black/60 border border-slate-700/50">
-            <div className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase">
-              {primaryAngleName} / {secondaryAngleName}
-            </div>
-            <div className="text-sm font-bold text-slate-200 tracking-tight font-mono">
-              {primaryAngle}° / {secondaryAngle}°
-            </div>
-          </div>
-
-          <div
-            className={`text-center px-3 py-1 rounded-xl bg-black/60 border ${
-              incomingAttack
-                ? "border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)] animate-pulse"
-                : isEnraged
-                ? "border-rose-500/60"
-                : "border-rose-500/40"
-            }`}
-          >
-            <div className="text-[9px] text-rose-400 font-semibold tracking-widest uppercase">
-              {incomingAttack ? "PARRY ALERT" : isEnraged ? "Enraged Cycle" : "Boss Strike"}
-            </div>
-            <div
-              className={`text-base font-black font-mono tracking-tight ${
-                incomingAttack
-                  ? "text-rose-400 animate-bounce"
-                  : bossAttackTimer <= 3.0
-                  ? "text-rose-400 animate-ping"
-                  : "text-amber-300"
-              }`}
-            >
-              {incomingAttack ? `PARRY: ${parryWindowSec.toFixed(1)}s` : `${bossAttackTimer.toFixed(1)}s`}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Boss HP & Clinician Button */}
-        <div className="flex items-center gap-3.5 w-80 justify-end">
-          <div className="flex-1 text-right">
-            <div className="flex justify-between text-xs font-bold tracking-wider mb-1">
-              <span className={isEnraged ? "text-rose-500 animate-pulse font-black flex items-center justify-end gap-1" : "text-violet-400"}>
-                {isEnraged ? (
-                  <>
-                    <span className="text-amber-400">🔥</span>
-                    <span>CYBER-COLOSSUS [OVERCLOCKED]</span>
-                  </>
-                ) : (
-                  "CYBER-COLOSSUS"
-                )}
-              </span>
-              <span className="text-rose-300 font-mono">{bossHp} / 500</span>
-            </div>
-            <div
-              className={`h-2.5 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border mb-1 ${
-                isEnraged ? "border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.7)]" : "border-rose-500/40"
-              }`}
-            >
               <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  isEnraged
-                    ? "bg-gradient-to-r from-red-600 via-rose-500 to-amber-400 animate-pulse shadow-[0_0_15px_rgba(244,63,94,0.9)]"
-                    : "bg-gradient-to-r from-violet-600 to-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.6)]"
+                className={`text-center px-3 py-1 rounded-xl bg-black/60 border ${
+                  incomingAttack
+                    ? "border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)] animate-pulse"
+                    : isEnraged
+                    ? "border-rose-500/60"
+                    : "border-rose-500/40"
                 }`}
-                style={{ width: `${Math.max(0, Math.min(100, (bossHp / 500) * 100))}%` }}
-              />
+              >
+                <div className="text-[9px] text-rose-400 font-semibold tracking-widest uppercase">
+                  {incomingAttack ? "PARRY ALERT" : isEnraged ? "Enraged Cycle" : "Boss Strike"}
+                </div>
+                <div
+                  className={`text-base font-black font-mono tracking-tight ${
+                    incomingAttack
+                      ? "text-rose-400 animate-bounce"
+                      : bossAttackTimer <= 3.0
+                      ? "text-rose-400 animate-ping"
+                      : "text-amber-300"
+                  }`}
+                >
+                  {incomingAttack ? `PARRY: ${parryWindowSec.toFixed(1)}s` : `${bossAttackTimer.toFixed(1)}s`}
+                </div>
+              </div>
             </div>
-          </div>
 
-          <button
-            onClick={() => setShowClinicianModal(true)}
-            className="px-3 py-1.5 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/40 text-xs font-bold text-emerald-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1.5"
-            title="Open Clinician Debrief"
-          >
-            <span>📊 DEBRIEF</span>
-          </button>
-        </div>
-      </header>
+            {/* Right: Boss HP & Navigation Badges */}
+            <div className="flex items-center gap-2.5 justify-end">
+              <div className="w-48 text-right hidden lg:block">
+                <div className="flex justify-between text-[11px] font-bold tracking-wider mb-1">
+                  <span className={isEnraged ? "text-rose-500 animate-pulse font-black flex items-center justify-end gap-1" : "text-violet-400"}>
+                    {isEnraged ? (
+                      <>
+                        <span className="text-amber-400">🔥</span>
+                        <span>OVERCLOCKED</span>
+                      </>
+                    ) : (
+                      "COLOSSUS"
+                    )}
+                  </span>
+                  <span className="text-rose-300 font-mono">{bossHp} / {bossMaxHp}</span>
+                </div>
+                <div
+                  className={`h-2 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border mb-1 ${
+                    isEnraged ? "border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.7)]" : "border-rose-500/40"
+                  }`}
+                >
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      isEnraged
+                        ? "bg-gradient-to-r from-red-600 via-rose-500 to-amber-400 animate-pulse shadow-[0_0_15px_rgba(244,63,94,0.9)]"
+                        : "bg-gradient-to-r from-violet-600 to-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.6)]"
+                    }`}
+                    style={{ width: `${Math.max(0, Math.min(100, (bossHp / bossMaxHp) * 100))}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Energy Cores Indicator */}
+              <button
+                onClick={() => setShowVaultModal(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-950/70 hover:bg-amber-900/90 border border-amber-500/50 text-xs font-black text-amber-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(245,158,11,0.3)] flex items-center gap-1.5"
+                title="Cosmetic Loadout Vault"
+              >
+                <span>⚡</span>
+                <span>{vault.energyCores} CORES</span>
+              </button>
+
+              {/* Armory Vault Button */}
+              <button
+                onClick={() => setShowVaultModal(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900/90 border border-purple-500/50 text-xs font-bold text-purple-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.3)] flex items-center gap-1.5"
+                title="Open Armory Vault"
+              >
+                <span>🛡️ ARMORY</span>
+              </button>
+
+              {/* Leaderboard Button */}
+              <button
+                onClick={() => {
+                  fetchLeaderboard();
+                  setShowLeaderboardModal(true);
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-cyan-950/70 hover:bg-cyan-900/90 border border-cyan-500/50 text-xs font-bold text-cyan-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.3)] flex items-center gap-1.5"
+                title="Global Bounty Leaderboard"
+              >
+                <span>🏆 LADDER</span>
+              </button>
+
+              {/* Debrief Modal Button */}
+              <button
+                onClick={() => setShowClinicianModal(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/50 text-xs font-bold text-emerald-300 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1.5"
+                title="Open Clinician Debrief"
+              >
+                <span>📊 DEBRIEF</span>
+              </button>
+            </div>
+          </header>
+        );
+      })()}
 
       {/* Dynamic Boss Enraged Alert Banner */}
       {isEnraged && matchStatus === "ACTIVE" && (
@@ -1635,10 +2133,10 @@ export default function AthleteMindPage() {
       )}
 
       {/* ------------------------------------------------------------------- */}
-      {/* 2. SECONDARY CONTROLS BAR: EXERCISE & DIFFICULTY SELECTORS          */}
+      {/* 2. SECONDARY CONTROLS BAR: EXERCISES, TIERS & PROTOCOL MUTATORS    */}
       {/* ------------------------------------------------------------------- */}
-      <div className="relative z-10 flex flex-wrap items-center justify-between px-6 py-2 bg-[#060a14]/90 border-b border-slate-800 text-xs">
-        {/* Exercise Carousel / Pill Selector */}
+      <div className="relative z-10 flex flex-wrap items-center justify-between px-6 py-2 bg-[#060a14]/90 border-b border-slate-800 text-xs gap-2">
+        {/* Movement Selector */}
         <div className="flex items-center gap-2">
           <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Movement:</span>
           <div className="flex items-center bg-black/60 rounded-xl p-0.5 border border-slate-800">
@@ -1685,9 +2183,9 @@ export default function AthleteMindPage() {
           </div>
         </div>
 
-        {/* Difficulty Modifiers */}
+        {/* Mobility Tier Selector */}
         <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Mobility Tier:</span>
+          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Tier:</span>
           <div className="flex items-center bg-black/60 rounded-xl p-0.5 border border-slate-800">
             <button
               onClick={() => handleSelectDifficulty("rehab")}
@@ -1718,6 +2216,46 @@ export default function AthleteMindPage() {
               }`}
             >
               🟣 ATHLETE (2.0s)
+            </button>
+          </div>
+        </div>
+
+        {/* Protocol Modifiers (Mutators) */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Protocols:</span>
+          <div className="flex items-center bg-black/60 rounded-xl p-0.5 border border-slate-800 gap-1">
+            <button
+              onClick={() => handleToggleModifier("HYPER_TENSION")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                modifiers.includes("HYPER_TENSION")
+                  ? "bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.6)] animate-pulse"
+                  : "text-amber-400/70 hover:text-amber-300"
+              }`}
+              title="3.0s bottom hold required. +50% bonus critical hit damage (150 DMG)."
+            >
+              🔥 HYPER-TENSION (3s / 150 DMG)
+            </button>
+            <button
+              onClick={() => handleToggleModifier("CLINICAL_STRICT")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                modifiers.includes("CLINICAL_STRICT")
+                  ? "bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.6)]"
+                  : "text-rose-400/70 hover:text-rose-300"
+              }`}
+              title="Valgus margin shrunk to ±10%. Strict joint alignment required."
+            >
+              ⚖️ STRICT VALGUS (±10%)
+            </button>
+            <button
+              onClick={() => handleToggleModifier("ENDURANCE_GAUNTLET")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                modifiers.includes("ENDURANCE_GAUNTLET")
+                  ? "bg-purple-600 text-white shadow-[0_0_10px_rgba(147,51,234,0.6)]"
+                  : "text-purple-400/70 hover:text-purple-300"
+              }`}
+              title="Boss HP scaled to 1,000. Boss attack interval accelerated to 5.0s."
+            >
+              💀 ENDURANCE (1,000 HP / 5s)
             </button>
           </div>
         </div>
@@ -1971,6 +2509,81 @@ export default function AthleteMindPage() {
               </div>
             </div>
 
+            {/* Victory Energy Cores Reward Banner */}
+            {matchStatus === "VICTORY" && (
+              <div className="p-4 rounded-2xl bg-amber-950/60 border border-amber-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-[0_0_20px_rgba(245,158,11,0.2)]">
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl animate-bounce">⚡</span>
+                  <div>
+                    <div className="text-sm font-black text-amber-300 uppercase tracking-wider">
+                      +{earnedCoresNotice || 50} Energy Cores Secured!
+                    </div>
+                    <div className="text-xs text-amber-200/80">
+                      Base Reward: 50 Cores • Biomechanical Purity Bonus: +{Math.max(0, Math.round(formPurity - 80))} Cores
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowClinicianModal(false);
+                    setShowVaultModal(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs uppercase tracking-wider cursor-pointer transition-all shadow-[0_0_12px_rgba(245,158,11,0.5)]"
+                >
+                  Enter Armory Vault
+                </button>
+              </div>
+            )}
+
+            {/* In-Debrief Leaderboard Submission Card */}
+            <div className="p-4 rounded-2xl bg-black/60 border border-cyan-500/30 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black uppercase text-cyan-300 tracking-wider">
+                  🏆 Transmit Bounty to Global Leaderboard Matrix
+                </span>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  Tension: {totalTensionTimeSec.toFixed(1)}s • Purity: {formPurity}%
+                </span>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center gap-2.5">
+                <input
+                  type="text"
+                  maxLength={18}
+                  value={callsign}
+                  onChange={(e) => setCallsign(e.target.value.toUpperCase())}
+                  placeholder="OPERATOR CALLSIGN"
+                  className="w-full sm:w-64 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 text-xs font-mono font-bold focus:outline-none focus:border-cyan-400 uppercase tracking-widest"
+                />
+                <button
+                  onClick={handleSubmitLeaderboard}
+                  disabled={isSubmittingLeaderboard || !callsign.trim()}
+                  className="w-full sm:w-auto px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs uppercase tracking-wider cursor-pointer disabled:opacity-50 transition-all shadow-[0_0_15px_rgba(6,182,212,0.4)]"
+                >
+                  {isSubmittingLeaderboard ? "Transmitting..." : "Transmit Telemetry"}
+                </button>
+                <button
+                  onClick={() => {
+                    fetchLeaderboard();
+                    setShowLeaderboardModal(true);
+                  }}
+                  className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer transition-all"
+                >
+                  View Top 10
+                </button>
+              </div>
+              {leaderboardStatus && (
+                <div
+                  className={`text-xs font-mono px-3.5 py-2 rounded-xl border ${
+                    leaderboardStatus.type === "success"
+                      ? "bg-emerald-950/80 border-emerald-500/50 text-emerald-300"
+                      : "bg-rose-950/80 border-rose-500/50 text-rose-300"
+                  }`}
+                >
+                  {leaderboardStatus.msg}
+                </div>
+              )}
+            </div>
+
             {/* Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-3 w-full">
               <button
@@ -1985,6 +2598,382 @@ export default function AthleteMindPage() {
               >
                 <span>⚔️ NEXT TARGET / RESTART</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* 5. PHASE 7 COSMETIC LOADOUT VAULT / ARMORY MODAL                   */}
+      {/* ------------------------------------------------------------------- */}
+      {showVaultModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <div className="relative w-full max-w-4xl bg-[#0a101f] border-2 border-amber-500/40 rounded-3xl p-6 sm:p-8 shadow-[0_0_80px_rgba(245,158,11,0.25)] flex flex-col gap-6 animate-in fade-in zoom-in duration-300">
+            {/* Vault Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-950/80 border border-amber-400/50 flex items-center justify-center text-2xl shadow-[0_0_15px_rgba(245,158,11,0.4)]">
+                  🛡️
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-amber-300">
+                    Cosmetic Loadout Vault & Armory
+                  </h2>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest">
+                    Equip canvas shaders, procedural audio profiles, and wireframe palettes
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="px-3.5 py-1.5 rounded-xl bg-amber-950/80 border border-amber-500/50 text-amber-300 font-mono font-black text-sm shadow-[0_0_12px_rgba(245,158,11,0.3)] flex items-center gap-1.5">
+                  <span>⚡</span>
+                  <span>{vault.energyCores} CORES</span>
+                </div>
+                <button
+                  onClick={() => setShowVaultModal(false)}
+                  className="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold flex items-center justify-center cursor-pointer transition-all"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* 3 Vault Categories */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Section 1: Skeletal Shaders */}
+              <div className="p-4 rounded-2xl bg-black/50 border border-slate-800 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-black uppercase text-cyan-300 tracking-wider">
+                    1. Skeletal Shaders
+                  </span>
+                  <span className="text-[10px] text-slate-400">&lt;canvas&gt; Render</span>
+                </div>
+                <div className="flex flex-col gap-2.5">
+                  {(["cyberpunk", "molten_core", "void_phantom"] as SkeletalShader[]).map((key) => {
+                    const s = SHADER_CONFIGS[key];
+                    const isUnlocked = vault.unlockedShaders.includes(key);
+                    const isEquipped = vault.activeShader === key;
+                    return (
+                      <div
+                        key={key}
+                        className={`p-3 rounded-xl border transition-all ${
+                          isEquipped
+                            ? "bg-slate-900 border-cyan-400 shadow-[0_0_15px_rgba(0,240,255,0.2)]"
+                            : "bg-black/40 border-slate-800 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold text-white tracking-wide">{s.name}</span>
+                          <div className="flex items-center gap-1">
+                            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: s.baseColor }} />
+                            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: s.holdingColor }} />
+                            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: s.targetColor }} />
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mb-2 leading-relaxed">{s.description}</p>
+                        <button
+                          onClick={() => handleBuyOrEquipShader(key)}
+                          className={`w-full py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            isEquipped
+                              ? "bg-cyan-500 text-black font-black"
+                              : isUnlocked
+                              ? "bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/40"
+                              : vault.energyCores >= s.cost
+                              ? "bg-amber-500 hover:bg-amber-400 text-black font-black shadow-[0_0_10px_rgba(245,158,11,0.5)]"
+                              : "bg-slate-900 text-slate-500 border border-slate-800 cursor-not-allowed"
+                          }`}
+                        >
+                          {isEquipped
+                            ? "✓ EQUIPPED"
+                            : isUnlocked
+                            ? "EQUIP"
+                            : `UNLOCK (${s.cost} CORES)`}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 2: Audio Soundpacks */}
+              <div className="p-4 rounded-2xl bg-black/50 border border-slate-800 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-black uppercase text-amber-300 tracking-wider">
+                    2. Audio Soundpacks
+                  </span>
+                  <span className="text-[10px] text-slate-400">Web Audio API</span>
+                </div>
+                <div className="flex flex-col gap-2.5">
+                  {/* Arcade Synth */}
+                  <div
+                    className={`p-3 rounded-xl border transition-all ${
+                      vault.activeSoundpack === "arcade_synth"
+                        ? "bg-slate-900 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+                        : "bg-black/40 border-slate-800 hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-white tracking-wide">ARCADE SYNTH</span>
+                      <span className="text-[10px] text-emerald-400 font-mono">DEFAULT</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mb-2 leading-relaxed">
+                      Classic square and sawtooth synthesizer chirps, retro combat feedback, and 8-bit tempo ticks.
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => synth.playCritHit()}
+                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 cursor-pointer"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        onClick={() => handleBuyOrEquipSoundpack("arcade_synth")}
+                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          vault.activeSoundpack === "arcade_synth"
+                            ? "bg-amber-500 text-black font-black"
+                            : "bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40"
+                        }`}
+                      >
+                        {vault.activeSoundpack === "arcade_synth" ? "✓ EQUIPPED" : "EQUIP"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Heavy Mecha */}
+                  <div
+                    className={`p-3 rounded-xl border transition-all ${
+                      vault.activeSoundpack === "heavy_mecha"
+                        ? "bg-slate-900 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+                        : "bg-black/40 border-slate-800 hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-white tracking-wide">HEAVY MECHA</span>
+                      <span className="text-[10px] text-amber-400 font-mono">200 CORES</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mb-2 leading-relaxed">
+                      Low-frequency sub-bass impacts (45-85Hz), industrial anvil parry clangs, and hydraulic servo clicks.
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => {
+                          const prev = synth.soundpack;
+                          synth.soundpack = "heavy_mecha";
+                          synth.playCritHit();
+                          synth.soundpack = prev;
+                        }}
+                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 cursor-pointer"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        onClick={() => handleBuyOrEquipSoundpack("heavy_mecha")}
+                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          vault.activeSoundpack === "heavy_mecha"
+                            ? "bg-amber-500 text-black font-black"
+                            : vault.unlockedSoundpacks.includes("heavy_mecha")
+                            ? "bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40"
+                            : vault.energyCores >= 200
+                            ? "bg-amber-500 hover:bg-amber-400 text-black font-black shadow-[0_0_10px_rgba(245,158,11,0.5)]"
+                            : "bg-slate-900 text-slate-500 border border-slate-800 cursor-not-allowed"
+                        }`}
+                      >
+                        {vault.activeSoundpack === "heavy_mecha"
+                          ? "✓ EQUIPPED"
+                          : vault.unlockedSoundpacks.includes("heavy_mecha")
+                          ? "EQUIP"
+                          : "UNLOCK (200 CORES)"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: HUD Wireframe Themes */}
+              <div className="p-4 rounded-2xl bg-black/50 border border-slate-800 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-black uppercase text-purple-300 tracking-wider">
+                    3. HUD Wireframe Themes
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-mono">UNLOCKED</span>
+                </div>
+                <div className="flex flex-col gap-2.5">
+                  {(["cyan", "emerald", "violet", "amber"] as WireframeTheme[]).map((tKey) => {
+                    const t = THEME_STYLES[tKey];
+                    const isEquipped = vault.activeTheme === tKey;
+                    return (
+                      <div
+                        key={tKey}
+                        onClick={() => handleSelectTheme(tKey)}
+                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                          isEquipped
+                            ? "bg-slate-900 border-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.2)]"
+                            : "bg-black/40 border-slate-800 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className="w-4 h-4 rounded-full border border-white/40"
+                            style={{
+                              backgroundColor:
+                                tKey === "cyan"
+                                  ? "#00f0ff"
+                                  : tKey === "emerald"
+                                  ? "#10b981"
+                                  : tKey === "violet"
+                                  ? "#a855f7"
+                                  : "#f59e0b",
+                            }}
+                          />
+                          <span className="text-xs font-bold text-white tracking-wide">{t.name}</span>
+                        </div>
+                        <span className={`text-[11px] font-mono font-bold ${isEquipped ? "text-purple-300" : "text-slate-500"}`}>
+                          {isEquipped ? "ACTIVE" : "SELECT"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* 6. PHASE 7 GLOBAL BOUNTY LEADERBOARD MODAL                         */}
+      {/* ------------------------------------------------------------------- */}
+      {showLeaderboardModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <div className="relative w-full max-w-4xl bg-[#080d1a] border-2 border-cyan-500/40 rounded-3xl p-6 sm:p-8 shadow-[0_0_80px_rgba(6,182,212,0.25)] flex flex-col gap-6 animate-in fade-in zoom-in duration-300">
+            {/* Leaderboard Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-950/80 border border-cyan-400/50 flex items-center justify-center text-2xl shadow-[0_0_15px_rgba(6,182,212,0.4)]">
+                  🏆
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-cyan-300">
+                    Global Bounty Leaderboard Matrix
+                  </h2>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest">
+                    Bounty Score = (Purity% × 100) + (Tension Sec × 10) - (Clear Time Sec × 2)
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchLeaderboard}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-bold transition-all cursor-pointer"
+                >
+                  🔄 Refresh
+                </button>
+                <button
+                  onClick={() => setShowLeaderboardModal(false)}
+                  className="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold flex items-center justify-center cursor-pointer transition-all"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Submission Card at Top */}
+            <div className="p-3.5 rounded-2xl bg-black/60 border border-cyan-500/30 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-300 uppercase">Callsign:</span>
+                <input
+                  type="text"
+                  maxLength={18}
+                  value={callsign}
+                  onChange={(e) => setCallsign(e.target.value.toUpperCase())}
+                  placeholder="OPERATOR CALLSIGN"
+                  className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 text-xs font-mono font-bold focus:outline-none focus:border-cyan-400 uppercase"
+                />
+              </div>
+              <button
+                onClick={handleSubmitLeaderboard}
+                disabled={isSubmittingLeaderboard || !callsign.trim()}
+                className="w-full sm:w-auto px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs uppercase tracking-wider cursor-pointer disabled:opacity-50 transition-all shadow-[0_0_15px_rgba(6,182,212,0.4)]"
+              >
+                {isSubmittingLeaderboard ? "Transmitting..." : "Submit Current Run"}
+              </button>
+            </div>
+
+            {leaderboardStatus && (
+              <div
+                className={`text-xs font-mono px-3.5 py-2 rounded-xl border ${
+                  leaderboardStatus.type === "success"
+                    ? "bg-emerald-950/80 border-emerald-500/50 text-emerald-300"
+                    : "bg-rose-950/80 border-rose-500/50 text-rose-300"
+                }`}
+              >
+                {leaderboardStatus.msg}
+              </div>
+            )}
+
+            {/* Ranked Table */}
+            <div className="rounded-2xl bg-black/60 border border-slate-800 overflow-hidden">
+              <table className="w-full text-left border-collapse font-mono text-xs">
+                <thead>
+                  <tr className="bg-slate-900/80 border-b border-slate-800 text-[10px] text-slate-400 uppercase tracking-wider">
+                    <th className="py-3 px-4">Rank</th>
+                    <th className="py-3 px-4">Operator</th>
+                    <th className="py-3 px-4">Bounty Score</th>
+                    <th className="py-3 px-4">Grade</th>
+                    <th className="py-3 px-4">Purity</th>
+                    <th className="py-3 px-4">Tension Time</th>
+                    <th className="py-3 px-4">Clear Time</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {leaderboard.length > 0 ? (
+                    leaderboard.map((row) => (
+                      <tr
+                        key={row.id}
+                        className={`hover:bg-slate-900/50 transition-colors ${
+                          row.rank === 1
+                            ? "bg-amber-950/20 text-amber-200"
+                            : row.rank === 2
+                            ? "bg-slate-800/30 text-slate-200"
+                            : row.rank === 3
+                            ? "bg-amber-950/10 text-amber-300"
+                            : "text-slate-300"
+                        }`}
+                      >
+                        <td className="py-3 px-4 font-bold">
+                          {row.rank === 1 ? "🥇 #1" : row.rank === 2 ? "🥈 #2" : row.rank === 3 ? "🥉 #3" : `#${row.rank}`}
+                        </td>
+                        <td className="py-3 px-4 font-bold tracking-wider text-cyan-300">{row.operator_name}</td>
+                        <td className="py-3 px-4 font-black text-amber-400 text-sm">
+                          {Number(row.bounty_score).toLocaleString()}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                              row.purity_grade === "S"
+                                ? "bg-emerald-950 border border-emerald-500/50 text-emerald-300"
+                                : row.purity_grade === "A"
+                                ? "bg-cyan-950 border border-cyan-500/50 text-cyan-300"
+                                : "bg-amber-950 border border-amber-500/50 text-amber-300"
+                            }`}
+                          >
+                            {row.purity_grade}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-bold">{row.form_purity_score}%</td>
+                        <td className="py-3 px-4">{row.total_tension_time_sec}s</td>
+                        <td className="py-3 px-4">{row.boss_clear_time_sec}s</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-500">
+                        Awaiting transmissions from verified operators...
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

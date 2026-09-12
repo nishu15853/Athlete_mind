@@ -251,6 +251,98 @@ def test_phase6_boss_combat_and_parrying():
 
     print("\n[OK] ALL PHASE 6 ARCADE COMBAT TESTS PASSED!")
 
+
+def test_phase7_mutators_and_leaderboard():
+    print("\n--- 9. Testing Phase 7 Progressive Encounter Mutators ---")
+    # 1. Hyper-Tension Protocol (3.0s hold requirement & 150 base damage)
+    squat_ht = SquatEngine(difficulty="standard", modifiers=["HYPER_TENSION"])
+    sim_t = 100.0
+    # Squat at bottom depth: 90 deg knee angle, 90 deg hip angle
+    hip = [0.2, 0.65, 0.0]
+    knee = [0.5, 0.65, 0.0]
+    ankle = [0.5, 0.95, 0.0]
+    shoulder = [0.2, 0.35, 0.0]
+
+    # Holding at depth for 2.0s should NOT trigger hit under Hyper-Tension
+    p1 = squat_ht.process(hip=hip, knee=knee, ankle=ankle, shoulder=shoulder, now=sim_t)
+    assert p1["phase"] == "HOLDING"
+    sim_t += 2.0
+    p2 = squat_ht.process(hip=hip, knee=knee, ankle=ankle, shoulder=shoulder, now=sim_t)
+    assert p2["status"] == "HOLDING"
+
+    # Holding until 3.0s triggers hit
+    sim_t += 1.0
+    p3 = squat_ht.process(hip=hip, knee=knee, ankle=ankle, shoulder=shoulder, now=sim_t)
+    assert p3["status"] == "hit"
+    assert p3["event"] == "HOLD_HIT"
+    print("Hyper-Tension 3.0s Hold Enforcement Verified!")
+
+    # Combat Engine with Hyper-Tension deals 150 base damage
+    combat_ht = BossCombatEngine(modifiers=["HYPER_TENSION"])
+    st = combat_ht.update(100.0, is_holding=False, rep_count=1, had_fault=False, is_critical=True)
+    assert st["combat_damage_dealt"] == 150
+    assert st["boss_hp"] == 350
+    print("Hyper-Tension +50% Bonus Damage (150 DMG) Verified!")
+
+    # 2. Clinical Strictness Protocol (+-10% valgus tolerance)
+    # Ratio = 0.82: fails strict (0.90 threshold) but passes standard (0.75 threshold)
+    l_knee = [0.41, 0.7, 0.0]
+    r_knee = [0.59, 0.7, 0.0]  # knee_sep = 0.18
+    l_ankle = [0.39, 0.95, 0.0]
+    r_ankle = [0.61, 0.95, 0.0]  # ankle_sep = 0.22 -> 0.18 / 0.22 = 0.818
+    assert not check_frontal_valgus(l_knee, r_knee, l_ankle, r_ankle, strict=False)
+    assert check_frontal_valgus(l_knee, r_knee, l_ankle, r_ankle, strict=True)
+    print("Clinical Strictness Valgus Gate Verified!")
+
+    # 3. Endurance Gauntlet (1,000 HP, 5s attack cycle)
+    combat_eg = BossCombatEngine(modifiers=["ENDURANCE_GAUNTLET"])
+    assert combat_eg.boss_max_hp == 1000
+    assert combat_eg.boss_hp == 1000
+    assert combat_eg.attack_timer == 5.0
+    print("Endurance Gauntlet 1000 HP & 5.0s Cycle Verified!")
+
+    print("\n--- 10. Testing Phase 7 Global Bounty Leaderboard Engine ---")
+    from main import calculate_bounty_score, submit_leaderboard_entry, get_top_leaderboard
+
+    # Test Bounty Score Formula: (Purity * 100) + (Tension * 10) - (ClearTime * 2)
+    score = calculate_bounty_score(purity=98.5, tension_sec=24.0, clear_time_sec=28.4)
+    expected = round((98.5 * 100.0) + (24.0 * 10.0) - (28.4 * 2.0), 1)
+    assert score == expected == 10033.2
+
+    # Anti-cheat disqualification: purity < 70%
+    disq = submit_leaderboard_entry(
+        operator_name="CHEATER_BOT",
+        boss_clear_time_sec=12.0,
+        form_purity_score=62.0,
+        total_tension_time_sec=5.0,
+    )
+    assert disq["status"] == "disqualified"
+    print("Leaderboard Anti-Cheat Disqualification (<70% Purity) Verified!")
+
+    # Valid score submission
+    sub = submit_leaderboard_entry(
+        operator_name="PILOT_TEST",
+        boss_clear_time_sec=32.0,
+        form_purity_score=96.0,
+        total_tension_time_sec=22.0,
+    )
+    assert sub["status"] == "accepted"
+    assert sub["rank"] >= 1
+    assert sub["purity_grade"] == "S"
+
+    # Query top 10
+    top = get_top_leaderboard(10)
+    assert len(top) >= 1
+    assert len(top) <= 10
+    # Verify sorted in descending order of bounty_score
+    scores = [r["bounty_score"] for r in top]
+    assert scores == sorted(scores, reverse=True)
+    print("Global Bounty Leaderboard Top 10 Ranked Query Verified!")
+
+    print("\n[OK] ALL PHASE 7 PROGRESSIVE MUTATOR & LEADERBOARD TESTS PASSED!")
+
+
 if __name__ == "__main__":
     test_phase5_multi_exercise_3d_engine()
     test_phase6_boss_combat_and_parrying()
+    test_phase7_mutators_and_leaderboard()

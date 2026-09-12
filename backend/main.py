@@ -2,12 +2,15 @@ import os
 import io
 import csv
 import time
+import json
+import sqlite3
 from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import numpy as np
 
-app = FastAPI(title="AthleteMind Phase 5 - 3D Multi-Exercise Biomechanics & Bio-Engine", version="5.0.0")
+app = FastAPI(title="AthleteMind Phase 7 - Biomechanics, Vault & Global Leaderboards", version="7.0.0")
 
 # CORS Configuration
 app.add_middleware(
@@ -65,8 +68,10 @@ def detect_orientation(left_shoulder: Any, right_shoulder: Any, left_hip: Any, r
     return "front" if width > 0.15 else "side"
 
 
-def check_knee_valgus(hip: Any, knee: Any, ankle: Any, side: str = "left", right_hip: Any = None) -> bool:
-    """Knee valgus tracking: flags if knee collapses inward relative to hip & ankle."""
+def check_knee_valgus(hip: Any, knee: Any, ankle: Any, side: str = "left", right_hip: Any = None, strict: bool = False) -> bool:
+    """Knee valgus tracking: flags if knee collapses inward relative to hip & ankle.
+    If strict: threshold shrunk to 0.015 (Clinical Strictness Protocol +/-10%).
+    """
     if not (hip and knee and ankle):
         return False
     hx, hy = float(hip[0]), float(hip[1])
@@ -81,22 +86,24 @@ def check_knee_valgus(hip: Any, knee: Any, ankle: Any, side: str = "left", right
             return False
         expected_kx = hx + ((ky - hy) / dy) * (ax - hx)
         inward = (expected_kx - kx) if hx > mid_x else (kx - expected_kx)
-        return bool(inward > 0.04)
+        thresh = 0.015 if strict else 0.04
+        return bool(inward > thresh)
 
     return False
 
 
-def check_frontal_valgus(left_knee: Any, right_knee: Any, left_ankle: Any, right_ankle: Any) -> bool:
+def check_frontal_valgus(left_knee: Any, right_knee: Any, left_ankle: Any, right_ankle: Any, strict: bool = False) -> bool:
     """Frontal Valgus / Alignment Tracking:
     Compare |x_left_knee - x_right_knee| against |x_left_ankle - x_right_ankle|.
-    If |x_left_knee - x_right_knee| < |x_left_ankle - x_right_ankle| * 0.75:
-    Knees are caving inward.
+    If strict: threshold is 0.90 (valgus margin +/-10%).
+    Default: threshold is 0.75 (valgus margin +/-25%).
     """
     if not (left_knee and right_knee and left_ankle and right_ankle):
         return False
     knee_sep = abs(float(left_knee[0]) - float(right_knee[0]))
     ankle_sep = abs(float(left_ankle[0]) - float(right_ankle[0]))
-    return bool(ankle_sep >= 0.05 and knee_sep < (ankle_sep * 0.75))
+    thresh = 0.90 if strict else 0.75
+    return bool(ankle_sep >= 0.05 and knee_sep < (ankle_sep * thresh))
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +127,7 @@ class SessionTelemetryStore:
         self.posture_faults = 0
         self.min_angle_achieved = 180.0
         self.active_exercise = "squats"
+        self.total_tension_time = 0.0
 
     def log_angle_sample(self, angle: float, now: float):
         if now - self.last_sample_time >= 0.1:  # 10Hz downsampling
@@ -158,6 +166,7 @@ class SessionTelemetryStore:
             faults.append("FAST_HOLD")
 
         purity = round(max(0.0, purity), 1)
+        self.total_tension_time += round(hold_dur, 2)
 
         self.rep_records.append({
             "rep_index": rep_idx,
@@ -183,6 +192,7 @@ class SessionTelemetryStore:
             "exercise": self.active_exercise,
             "total_reps": total_reps,
             "mean_bottom_hold_time": round(mean_hold, 2),
+            "total_tension_time_sec": round(self.total_tension_time, 2),
             "max_depth_angle": round(self.min_angle_achieved, 1) if self.min_angle_achieved < 180.0 else 90.0,
             "purity_score": purity_score,
             "biomechanical_fault_breakdown": {
@@ -225,10 +235,11 @@ global_telemetry = SessionTelemetryStore()
 class BaseExerciseEngine:
     """Base class for modular 3D kinematic exercise state machines."""
 
-    def __init__(self, exercise_type: str, difficulty: str = "standard", telemetry: Optional[SessionTelemetryStore] = None):
+    def __init__(self, exercise_type: str, difficulty: str = "standard", telemetry: Optional[SessionTelemetryStore] = None, modifiers: Optional[List[str]] = None):
         self.exercise_type = exercise_type
         self.difficulty = difficulty
         self.telemetry = telemetry or global_telemetry
+        self.modifiers: List[str] = [m.upper() for m in (modifiers or [])]
         self.rep_count = 0
         self.phase = "STARTING"
         self.hold_start_time: Optional[float] = None
@@ -248,6 +259,9 @@ class BaseExerciseEngine:
         # Smoothing
         self.smooth_primary: Optional[float] = None
         self.smooth_secondary: Optional[float] = None
+
+    def set_modifiers(self, modifiers: List[str]):
+        self.modifiers = [m.upper() for m in (modifiers or [])]
 
     def set_difficulty(self, difficulty: str):
         if difficulty in ("rehab", "standard", "athlete"):
@@ -353,8 +367,8 @@ class BaseExerciseEngine:
 class SquatEngine(BaseExerciseEngine):
     """Squat Kinematics: 3D Hip(23) - Knee(25) - Ankle(27) + Medial Valgus & Frontal Depth."""
 
-    def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard"):
-        super().__init__("squats", difficulty, telemetry)
+    def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard", modifiers: Optional[List[str]] = None):
+        super().__init__("squats", difficulty, telemetry, modifiers=modifiers)
         self.y_hip_standing: Optional[float] = None
         self.y_knee_standing: Optional[float] = None
 
@@ -372,7 +386,7 @@ class SquatEngine(BaseExerciseEngine):
         if now is None:
             now = time.time()
 
-        # Targets based on difficulty modifier
+        # Targets based on difficulty modifier & protocol mutators
         if self.difficulty == "rehab":
             bottom_depth_max = 100.0
             bottom_depth_min = 60.0
@@ -388,6 +402,9 @@ class SquatEngine(BaseExerciseEngine):
             bottom_depth_min = 70.0
             stand_min = 155.0
             target_hold = 1.5
+
+        if "HYPER_TENSION" in self.modifiers:
+            target_hold = 3.0
 
         # Detect Front vs Side orientation
         view_mode = detect_orientation(left_shoulder, right_shoulder, hip, right_hip)
@@ -430,12 +447,13 @@ class SquatEngine(BaseExerciseEngine):
         if knee_ang < self.current_rep_min_angle:
             self.current_rep_min_angle = knee_ang
 
-        # Frontal Valgus Tracking
+        # Frontal Valgus Tracking with Clinical Strictness Protocol
         valgus = False
+        strict = "CLINICAL_STRICT" in self.modifiers
         if left_knee and right_knee and left_ankle and right_ankle:
-            valgus = check_frontal_valgus(left_knee, right_knee, left_ankle, right_ankle)
+            valgus = check_frontal_valgus(left_knee, right_knee, left_ankle, right_ankle, strict=strict)
         else:
-            valgus = check_knee_valgus(hip, knee, ankle, side="left", right_hip=right_hip)
+            valgus = check_knee_valgus(hip, knee, ankle, side="left", right_hip=right_hip, strict=strict)
 
         if valgus:
             self.current_rep_had_fault = True
@@ -619,8 +637,8 @@ class SquatEngine(BaseExerciseEngine):
 class PushUpEngine(BaseExerciseEngine):
     """Push-ups: Shoulder(11) - Elbow(13) - Wrist(15) + Plank Trunk(11-23-27)."""
 
-    def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard"):
-        super().__init__("pushups", difficulty, telemetry)
+    def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard", modifiers: Optional[List[str]] = None):
+        super().__init__("pushups", difficulty, telemetry, modifiers=modifiers)
 
     def process(self, shoulder: Any, elbow: Any, wrist: Any, hip: Any = None,
                 ankle: Any = None, now: Optional[float] = None, **kwargs) -> Dict[str, Any]:
@@ -639,6 +657,9 @@ class PushUpEngine(BaseExerciseEngine):
             bottom_elbow_max = 90.0
             lockout_min = 165.0
             target_hold = 1.5
+
+        if "HYPER_TENSION" in self.modifiers:
+            target_hold = 3.0
 
         if self.is_stunned:
             if now >= self.stun_until:
@@ -675,8 +696,9 @@ class PushUpEngine(BaseExerciseEngine):
         if elbow_ang < self.current_rep_min_angle:
             self.current_rep_min_angle = elbow_ang
 
-        # Plank integrity check
-        lumbar_sag = abs(180.0 - plank_ang) > 20.0
+        # Plank integrity check (Clinical Strictness Protocol reduces tolerance to 10 deg)
+        plank_tol = 10.0 if "CLINICAL_STRICT" in self.modifiers else 20.0
+        lumbar_sag = abs(180.0 - plank_ang) > plank_tol
         if lumbar_sag:
             self.current_rep_had_fault = True
             self.current_rep_fault_name = "lumbar_sag"
@@ -821,8 +843,8 @@ class PushUpEngine(BaseExerciseEngine):
 class OverheadPressEngine(BaseExerciseEngine):
     """Overhead Press: Hip(23) - Shoulder(11) - Elbow(13) + Lumbar Arch(11-23-25)."""
 
-    def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard"):
-        super().__init__("overhead_press", difficulty, telemetry)
+    def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard", modifiers: Optional[List[str]] = None):
+        super().__init__("overhead_press", difficulty, telemetry, modifiers=modifiers)
 
     def process(self, hip: Any, shoulder: Any, elbow: Any, knee: Any = None,
                 wrist: Any = None, now: Optional[float] = None, **kwargs) -> Dict[str, Any]:
@@ -841,6 +863,9 @@ class OverheadPressEngine(BaseExerciseEngine):
             top_lockout_min = 165.0
             rack_position_max = 80.0
             target_hold = 1.5
+
+        if "HYPER_TENSION" in self.modifiers:
+            target_hold = 3.0
 
         if self.is_stunned:
             if now >= self.stun_until:
@@ -877,7 +902,9 @@ class OverheadPressEngine(BaseExerciseEngine):
         if shoulder_ang > self.current_rep_min_angle or self.current_rep_min_angle == 180.0:
             self.current_rep_min_angle = shoulder_ang
 
-        lumbar_arch = abs(180.0 - spine_ang) > 20.0
+        # Spine integrity check (Clinical Strictness Protocol reduces tolerance to 10 deg)
+        spine_tol = 10.0 if "CLINICAL_STRICT" in self.modifiers else 20.0
+        lumbar_arch = abs(180.0 - spine_ang) > spine_tol
         if lumbar_arch:
             self.current_rep_had_fault = True
             self.current_rep_fault_name = "lumbar_arch"
@@ -1022,8 +1049,8 @@ class OverheadPressEngine(BaseExerciseEngine):
 class RDLEngine(BaseExerciseEngine):
     """Romanian Deadlifts: Shoulder(11) - Hip(23) - Knee(25) + Knee Flexion(23-25-27)."""
 
-    def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard"):
-        super().__init__("rdl", difficulty, telemetry)
+    def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard", modifiers: Optional[List[str]] = None):
+        super().__init__("rdl", difficulty, telemetry, modifiers=modifiers)
 
     def process(self, shoulder: Any, hip: Any, knee: Any, ankle: Any = None,
                 now: Optional[float] = None, **kwargs) -> Dict[str, Any]:
@@ -1048,6 +1075,11 @@ class RDLEngine(BaseExerciseEngine):
             stand_min = 160.0
             knee_min = 135.0
             target_hold = 1.5
+
+        if "HYPER_TENSION" in self.modifiers:
+            target_hold = 3.0
+        if "CLINICAL_STRICT" in self.modifiers:
+            knee_min = max(knee_min, 145.0)
 
         if self.is_stunned:
             if now >= self.stun_until:
@@ -1223,60 +1255,50 @@ class RDLEngine(BaseExerciseEngine):
         )
 
 
-def create_exercise_engine(exercise_type: str, difficulty: str = "standard", telemetry: Optional[SessionTelemetryStore] = None) -> BaseExerciseEngine:
+def create_exercise_engine(exercise_type: str, difficulty: str = "standard", telemetry: Optional[SessionTelemetryStore] = None, modifiers: Optional[List[str]] = None) -> BaseExerciseEngine:
     """Factory function for instantiating exercise processors."""
     ex = exercise_type.lower()
+    mods = modifiers or []
     if ex in ("pushups", "pushup", "push_ups", "push_up"):
-        return PushUpEngine(telemetry, difficulty)
+        return PushUpEngine(telemetry, difficulty, modifiers=mods)
     elif ex in ("overhead_press", "overhead", "ohp", "shoulder_press"):
-        return OverheadPressEngine(telemetry, difficulty)
+        return OverheadPressEngine(telemetry, difficulty, modifiers=mods)
     elif ex in ("rdl", "romanian_deadlift", "hip_hinge"):
-        return RDLEngine(telemetry, difficulty)
-    return SquatEngine(telemetry, difficulty)
+        return RDLEngine(telemetry, difficulty, modifiers=mods)
+    return SquatEngine(telemetry, difficulty, modifiers=mods)
 
 
 # ---------------------------------------------------------------------------
-# Phase 6: Arcade Combat Engine (Dynamic Boss Phases, Parrying, Combo Multipliers)
+# Phase 6 & 7: Arcade Combat Engine & Progressive Encounter Mutators
 # ---------------------------------------------------------------------------
 
 class BossCombatEngine:
-    """Arcade Boss Combat Engine:
-    - Boss HP (500 max), Player HP (100 max)
-    - Dynamic Boss Phase:
-        - Phase 1 (Standard): Boss HP > 250 (50%). Attacks every 10.0s if player idle.
-        - Phase 2 (Overclocked / Enraged): Boss HP <= 250 (50%). Attacks accelerate to 6.0s.
-          Emits boss_state: "ENRAGED".
-    - Timed Evasion & Biomechanical Parrying:
-        - When attack timer reaches 0, enters 3.0s telegraph window:
-          incoming_attack = True, parry_window_sec = 3.0.
-        - If player maintains verified hold depth (is_holding) within window:
-          parry_success = True.
-          Reflects 50 damage to Boss HP.
-          Resets attack cycle.
-        - If window expires without verified hold:
-          parry_failed = True.
-          Player receives -35 HP direct damage.
-          Resets attack cycle.
-    - Kinetic Combo Multiplier:
-        - Consecutive pure reps:
-          1 rep -> 1.0x (100 damage)
-          2 reps -> 1.5x (150 damage)
-          3 reps -> 2.0x (200 damage)
-          4+ reps -> 3.0x (300 damage "HYPER OVERDRIVE")
-        - Form fault gate:
-          Any form fault (valgus, ego-lift, shallow release, posture fault) immediately
-          resets streak to 0 (1.0x multiplier), triggering streak_collapsed = True.
+    """Arcade Boss Combat Engine with progressive encounter mutators:
+    - Standard Encounter: Boss HP 500, attacks every 10s (6s enraged)
+    - ENDURANCE_GAUNTLET: Boss HP 1000, attacks every 5s (3.5s enraged)
+    - HYPER_TENSION: Grants +50% bonus damage (150 base) per critical hit
+    - CLINICAL_STRICT: Strict valgus / alignment tolerances
     """
-    def __init__(self):
+    def __init__(self, modifiers: Optional[List[str]] = None):
+        self.modifiers: List[str] = [m.upper() for m in (modifiers or [])]
         self.reset()
 
+    def set_modifiers(self, modifiers: List[str]):
+        self.modifiers = [m.upper() for m in (modifiers or [])]
+        if "ENDURANCE_GAUNTLET" in self.modifiers:
+            self.boss_max_hp = 1000
+            if self.boss_hp == 500:
+                self.boss_hp = 1000
+            self.attack_timer = min(self.attack_timer, 5.0)
+
     def reset(self):
-        self.boss_hp = 500
-        self.boss_max_hp = 500
+        is_endurance = "ENDURANCE_GAUNTLET" in self.modifiers
+        self.boss_max_hp = 1000 if is_endurance else 500
+        self.boss_hp = self.boss_max_hp
         self.player_hp = 100
         self.player_max_hp = 100
         self.boss_state = "STANDARD"
-        self.attack_timer = 10.0
+        self.attack_timer = 5.0 if is_endurance else 10.0
         self.last_update_time: Optional[float] = None
         self.incoming_attack = False
         self.parry_window_left = 0.0
@@ -1293,12 +1315,17 @@ class BossCombatEngine:
         self.last_update_time = now
 
         # Update Boss Phase
-        if self.boss_hp <= 250:
+        enrage_threshold = self.boss_max_hp * 0.5
+        if self.boss_hp <= enrage_threshold:
             self.boss_state = "ENRAGED"
         else:
             self.boss_state = "STANDARD"
 
-        base_attack_interval = 6.0 if self.boss_state == "ENRAGED" else 10.0
+        is_endurance = "ENDURANCE_GAUNTLET" in self.modifiers
+        if is_endurance:
+            base_attack_interval = 3.5 if self.boss_state == "ENRAGED" else 5.0
+        else:
+            base_attack_interval = 6.0 if self.boss_state == "ENRAGED" else 10.0
 
         parry_success = False
         parry_failed = False
@@ -1330,7 +1357,9 @@ class BossCombatEngine:
             else:
                 self.damage_multiplier = 1.0
 
-            damage_dealt = int(100 * self.damage_multiplier)
+            # Hyper-Tension grants +50% bonus damage (150 base)
+            base_rep_damage = 150 if "HYPER_TENSION" in self.modifiers else 100
+            damage_dealt = int(base_rep_damage * self.damage_multiplier)
             self.boss_hp = max(0, self.boss_hp - damage_dealt)
             # Reset attack cycle on player hit
             self.attack_timer = base_attack_interval
@@ -1366,7 +1395,7 @@ class BossCombatEngine:
                     self.incoming_attack = True
                     self.parry_window_left = 3.0
 
-        if self.boss_hp <= 250:
+        if self.boss_hp <= enrage_threshold:
             self.boss_state = "ENRAGED"
 
         return {
@@ -1385,6 +1414,7 @@ class BossCombatEngine:
             "streak_collapsed": self.streak_collapsed,
             "combat_damage_dealt": damage_dealt,
             "combat_damage_taken": damage_taken,
+            "modifiers": self.modifiers,
         }
 
 
@@ -1428,6 +1458,157 @@ def reset_session_telemetry():
 
 
 # ---------------------------------------------------------------------------
+# Phase 7: Global Bounty Leaderboard Database & Service (SQLite)
+# ---------------------------------------------------------------------------
+
+DB_PATH = os.path.join(os.path.dirname(__file__), "leaderboard.db")
+
+
+def init_leaderboard_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS leaderboard (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operator_name TEXT NOT NULL,
+            boss_clear_time_sec REAL NOT NULL,
+            form_purity_score REAL NOT NULL,
+            total_tension_time_sec REAL NOT NULL,
+            bounty_score REAL NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    """)
+    cursor.execute("SELECT COUNT(*) FROM leaderboard")
+    count = cursor.fetchone()[0]
+    if count == 0:
+        initial_benchmarks = [
+            ("APEX_PILOT", 28.4, 98.5, 24.0, "2026-09-12 18:20:00"),
+            ("TITAN_REHAB", 36.2, 94.0, 22.5, "2026-09-12 18:45:00"),
+            ("VIBRO_STRIKER", 31.0, 91.5, 19.0, "2026-09-12 19:10:00"),
+            ("CYBER_VALKYRIE", 42.5, 88.0, 20.0, "2026-09-12 19:25:00"),
+            ("KINETIC_GHOST", 48.0, 82.0, 18.0, "2026-09-12 19:40:00"),
+            ("BIO_HUNTER_07", 55.0, 76.0, 16.0, "2026-09-12 19:55:00"),
+        ]
+        for name, clear_time, purity, tension, ts in initial_benchmarks:
+            b_score = round((purity * 100.0) + (tension * 10.0) - (clear_time * 2.0), 1)
+            cursor.execute("""
+                INSERT INTO leaderboard (operator_name, boss_clear_time_sec, form_purity_score, total_tension_time_sec, bounty_score, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, clear_time, purity, tension, b_score, ts))
+        conn.commit()
+    conn.close()
+
+
+init_leaderboard_db()
+
+
+def calculate_bounty_score(purity: float, tension_sec: float, clear_time_sec: float) -> float:
+    return round((purity * 100.0) + (tension_sec * 10.0) - (clear_time_sec * 2.0), 1)
+
+
+def get_purity_grade(purity: float) -> str:
+    if purity >= 90.0:
+        return "S"
+    elif purity >= 80.0:
+        return "A"
+    elif purity >= 70.0:
+        return "B"
+    return "C"
+
+
+def submit_leaderboard_entry(operator_name: str, boss_clear_time_sec: float, form_purity_score: float, total_tension_time_sec: float) -> Dict[str, Any]:
+    if form_purity_score < 70.0:
+        return {
+            "status": "disqualified",
+            "message": "Disqualified: Form Purity Score below 70% threshold.",
+            "form_purity_score": form_purity_score,
+        }
+
+    bounty_score = calculate_bounty_score(form_purity_score, total_tension_time_sec, boss_clear_time_sec)
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO leaderboard (operator_name, boss_clear_time_sec, form_purity_score, total_tension_time_sec, bounty_score, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (operator_name.strip() or "ANONYMOUS_OPERATOR", boss_clear_time_sec, form_purity_score, total_tension_time_sec, bounty_score, ts))
+    entry_id = cursor.lastrowid
+    conn.commit()
+
+    cursor.execute("SELECT COUNT(*) FROM leaderboard WHERE bounty_score > ?", (bounty_score,))
+    rank = cursor.fetchone()[0] + 1
+    conn.close()
+
+    return {
+        "status": "accepted",
+        "id": entry_id,
+        "operator_name": operator_name.strip() or "ANONYMOUS_OPERATOR",
+        "bounty_score": bounty_score,
+        "purity_grade": get_purity_grade(form_purity_score),
+        "rank": rank,
+        "timestamp": ts,
+    }
+
+
+def get_top_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, operator_name, boss_clear_time_sec, form_purity_score, total_tension_time_sec, bounty_score, timestamp
+        FROM leaderboard
+        ORDER BY bounty_score DESC
+        LIMIT ?
+    """, (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    results = []
+    for idx, r in enumerate(rows, start=1):
+        results.append({
+            "rank": idx,
+            "id": r[0],
+            "operator_name": r[1],
+            "boss_clear_time_sec": r[2],
+            "form_purity_score": r[3],
+            "total_tension_time_sec": r[4],
+            "bounty_score": r[5],
+            "purity_grade": get_purity_grade(r[3]),
+            "timestamp": r[6],
+        })
+    return results
+
+
+class LeaderboardSubmission(BaseModel):
+    operator_name: str
+    boss_clear_time_sec: float
+    form_purity_score: float
+    total_tension_time_sec: float
+
+
+@app.post("/api/leaderboard/submit")
+def submit_score(sub: LeaderboardSubmission):
+    result = submit_leaderboard_entry(
+        operator_name=sub.operator_name,
+        boss_clear_time_sec=sub.boss_clear_time_sec,
+        form_purity_score=sub.form_purity_score,
+        total_tension_time_sec=sub.total_tension_time_sec,
+    )
+    if result.get("status") == "disqualified":
+        return Response(
+            content=json.dumps(result),
+            media_type="application/json",
+            status_code=400,
+        )
+    return result
+
+
+@app.get("/api/leaderboard")
+def get_leaderboard():
+    return {"leaderboard": get_top_leaderboard(10)}
+
+
+# ---------------------------------------------------------------------------
 # WebSocket Endpoint: Stream Landmarks & Broadcast Live Status
 # ---------------------------------------------------------------------------
 
@@ -1436,8 +1617,9 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     current_exercise = "squats"
     current_difficulty = "standard"
-    engine: BaseExerciseEngine = SquatEngine(global_telemetry, difficulty=current_difficulty)
-    combat_engine = BossCombatEngine()
+    current_modifiers: List[str] = []
+    engine: BaseExerciseEngine = SquatEngine(global_telemetry, difficulty=current_difficulty, modifiers=current_modifiers)
+    combat_engine = BossCombatEngine(modifiers=current_modifiers)
 
     try:
         while True:
@@ -1445,6 +1627,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # Handle reset action
             if data.get("action") == "reset":
+                mods = data.get("modifiers")
+                if mods is not None:
+                    current_modifiers = [m.upper() for m in mods]
+                    engine.set_modifiers(current_modifiers)
+                    combat_engine.set_modifiers(current_modifiers)
                 engine.reset()
                 global_telemetry.reset()
                 combat_engine.reset()
@@ -1461,35 +1648,42 @@ async def websocket_endpoint(websocket: WebSocket):
                     "damage_taken": 0,
                     "purity": 100.0,
                     "audio_cue": "Session reset",
-                    "boss_hp": 500,
-                    "boss_max_hp": 500,
+                    "boss_hp": combat_engine.boss_hp,
+                    "boss_max_hp": combat_engine.boss_max_hp,
                     "player_hp": 100,
                     "player_max_hp": 100,
-                    "boss_state": "STANDARD",
-                    "boss_attack_timer": 10.0,
+                    "boss_state": combat_engine.boss_state,
+                    "boss_attack_timer": combat_engine.attack_timer,
                     "incoming_attack": False,
                     "parry_window_sec": 0.0,
                     "combo_streak": 0,
                     "combo_multiplier": 1.0,
+                    "modifiers": current_modifiers,
                 })
                 continue
 
-            # Handle switching exercise or difficulty mode
+            # Handle switching exercise, difficulty mode, or encounter protocol modifiers
             if data.get("action") == "set_exercise":
                 new_ex = data.get("exercise_type", current_exercise)
                 new_diff = data.get("difficulty", current_difficulty)
+                new_mods = data.get("modifiers")
+                if new_mods is not None:
+                    current_modifiers = [m.upper() for m in new_mods]
                 current_exercise = new_ex
                 current_difficulty = new_diff
                 global_telemetry.active_exercise = current_exercise
-                engine = create_exercise_engine(current_exercise, current_difficulty, global_telemetry)
+                engine = create_exercise_engine(current_exercise, current_difficulty, global_telemetry, modifiers=current_modifiers)
+                combat_engine.set_modifiers(current_modifiers)
                 await websocket.send_json({
                     "event": "EXERCISE_CHANGED",
                     "exercise_type": current_exercise,
                     "difficulty": current_difficulty,
+                    "modifiers": current_modifiers,
                     "status": "TRACKING",
                     "message": f"SWITCHED TO {current_exercise.upper()} ({current_difficulty.upper()})",
                     "audio_cue": f"Ready for {current_exercise}",
                     "boss_hp": combat_engine.boss_hp,
+                    "boss_max_hp": combat_engine.boss_max_hp,
                     "player_hp": combat_engine.player_hp,
                     "boss_state": combat_engine.boss_state,
                     "combo_streak": combat_engine.combo_streak,
@@ -1497,13 +1691,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
                 continue
 
-            # Check if dynamic exercise/difficulty sent inline with coordinates
+            # Check if dynamic exercise/difficulty/modifiers sent inline with coordinates
             inline_ex = data.get("exercise_type")
             inline_diff = data.get("difficulty")
+            inline_mods = data.get("modifiers")
+            if inline_mods is not None and set(inline_mods) != set(current_modifiers):
+                current_modifiers = [m.upper() for m in inline_mods]
+                engine.set_modifiers(current_modifiers)
+                combat_engine.set_modifiers(current_modifiers)
             if inline_ex and inline_ex != current_exercise:
                 current_exercise = inline_ex
                 global_telemetry.active_exercise = current_exercise
-                engine = create_exercise_engine(current_exercise, current_difficulty, global_telemetry)
+                engine = create_exercise_engine(current_exercise, current_difficulty, global_telemetry, modifiers=current_modifiers)
             if inline_diff and inline_diff != current_difficulty:
                 current_difficulty = inline_diff
                 engine.set_difficulty(current_difficulty)
@@ -1714,6 +1913,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if combat_data.get("streak_collapsed"):
                 payload["message"] = "FORM FAULT - STREAK COLLAPSED!"
                 payload["audio_cue"] = "Streak lost"
+
+            payload["modifiers"] = current_modifiers
+            payload["total_tension_time_sec"] = round(global_telemetry.total_tension_time, 2)
 
             await websocket.send_json(payload)
 
