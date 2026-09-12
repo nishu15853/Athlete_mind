@@ -1738,6 +1738,17 @@ export default function AthleteMindPage() {
     activeDialogueIdRef.current = activeDialogueId;
   }, [activeDialogueId]);
 
+  const activeCircuitModeRef = useRef<CircuitMode | null>(null);
+  const circuitStepRef = useRef<number>(1);
+
+  useEffect(() => {
+    activeCircuitModeRef.current = activeCircuitMode;
+  }, [activeCircuitMode]);
+
+  useEffect(() => {
+    circuitStepRef.current = circuitStep;
+  }, [circuitStep]);
+
   // Load vault, callsign, and clinical history on mount
   useEffect(() => {
     try {
@@ -2250,7 +2261,64 @@ export default function AthleteMindPage() {
       } catch {}
       return updated;
     });
-  }, [repCount, minSessionAngle, holdDurations, targetHoldDuration, valgusCount, formPurity]);
+
+    // Evaluate 10-Achievement System
+    setAchievementsList((prevAchs) => {
+      const updated = prevAchs.map((ach) => {
+        if (ach.unlocked) return ach;
+        let unlocked = false;
+        let newProgress = ach.currentProgress;
+
+        if (ach.id === "first_blood") {
+          newProgress = 1;
+          unlocked = true;
+        } else if (ach.id === "centurion_1") {
+          newProgress = Math.min(ach.maxProgress, ach.currentProgress + repCount);
+          if (newProgress >= 50) unlocked = true;
+        } else if (ach.id === "centurion_2") {
+          newProgress = Math.min(ach.maxProgress, ach.currentProgress + repCount);
+          if (newProgress >= 100) unlocked = true;
+        } else if (ach.id === "iron_tendons" && valgusCount === 0 && repCount >= 5) {
+          newProgress = 1;
+          unlocked = true;
+        } else if (ach.id === "zen_anchor") {
+          newProgress = Math.min(ach.maxProgress, Math.round(ach.currentProgress + totalHold));
+          if (newProgress >= 30) unlocked = true;
+        } else if (ach.id === "unbroken_rhythm") {
+          newProgress = Math.min(ach.maxProgress, Math.max(ach.currentProgress, comboStreak));
+          if (newProgress >= 5) unlocked = true;
+        } else if (ach.id === "bilateral_master" && formPurity >= 95 && repCount >= 5) {
+          newProgress = 1.6;
+          unlocked = true;
+        } else if (ach.id === "pushup_pioneer" && exercise === "pushups") {
+          newProgress = Math.min(ach.maxProgress, Math.max(ach.currentProgress, repCount));
+          if (newProgress >= 10) unlocked = true;
+        } else if (ach.id === "relentless_adherence") {
+          newProgress = Math.min(ach.maxProgress, Math.max(ach.currentProgress, (adherence?.streakDays || 1)));
+          if (newProgress >= 7) unlocked = true;
+        } else if (ach.id === "clinical_graduation" && avgDepth <= 90 && formPurity >= 95) {
+          newProgress = Math.min(ach.maxProgress, ach.currentProgress + 1);
+          if (newProgress >= 5) unlocked = true;
+        }
+
+        if (unlocked) {
+          synth.playHarmonicChord();
+          return {
+            ...ach,
+            unlocked: true,
+            currentProgress: newProgress,
+            unlockedAt: sessionDate,
+          };
+        }
+        return { ...ach, currentProgress: newProgress };
+      });
+
+      try {
+        localStorage.setItem("unlocked_achievements", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  }, [repCount, minSessionAngle, holdDurations, targetHoldDuration, valgusCount, formPurity, comboStreak, exercise, adherence]);
 
   // Rest-Day Mode Toggle (Locks Combat Hazards, Preserves Daily Streak)
   const handleToggleRestDay = () => {
@@ -2319,6 +2387,99 @@ export default function AthleteMindPage() {
     document.body.removeChild(link);
     speakCoachCue("Clinical telemetry CSV generated");
   };
+
+  // ---------------------------------------------------------------------------
+  // Navigation & Protocol Handlers
+  // ---------------------------------------------------------------------------
+
+  const handleResetAllData = useCallback(() => {
+    try {
+      localStorage.removeItem("athletemind_vault");
+      localStorage.removeItem("athletemind_callsign");
+      localStorage.removeItem("athletemind_recovery_history");
+      localStorage.removeItem("athletemind_baseline_session");
+      localStorage.removeItem("athletemind_badges");
+      localStorage.removeItem("athletemind_adherence");
+      localStorage.removeItem("athletemind_bio_credits");
+      localStorage.removeItem("unlocked_achievements");
+    } catch {}
+
+    setVault(DEFAULT_VAULT);
+    vaultRef.current = DEFAULT_VAULT;
+    activeShaderRef.current = "cyberpunk";
+    synth.soundpack = "arcade_synth";
+    setRecoveryHistory(SEED_RECOVERY_HISTORY);
+    recoveryHistoryRef.current = SEED_RECOVERY_HISTORY;
+    setBaselineSession(DEFAULT_BASELINE_SESSION);
+    baselineSessionRef.current = DEFAULT_BASELINE_SESSION;
+    setClinicalBadges(DEFAULT_CLINICAL_BADGES);
+    setAdherence(DEFAULT_ADHERENCE);
+    setIsRestDay(false);
+    isRestDayRef.current = false;
+    setBioCredits(350);
+    bioCreditsRef.current = 350;
+    setAchievementsList(INITIAL_ACHIEVEMENTS);
+
+    speakCoachCue("System purged. All clinical and combat data restored to baseline.");
+  }, [speakCoachCue]);
+
+  const handleLaunchCircuit = useCallback(
+    (mode: CircuitMode) => {
+      setActiveCircuitMode(mode);
+      setCircuitStep(1);
+
+      if (mode === "HYPER_TENSION") {
+        setExercise("squats");
+        setDifficulty("athlete");
+        setTargetHoldDuration(2.0);
+        setIsRestDay(false);
+        speakCoachCue("Hyper-Tension Protocol engaged. 2.5s controlled eccentric with 2.0s pause.");
+      } else if (mode === "FULL_BODY") {
+        setExercise("squats");
+        setDifficulty("standard");
+        setTargetHoldDuration(1.0);
+        setIsRestDay(false);
+        speakCoachCue("Full-Body Kinetic Circuit engaged. Stage 1: 5 Squats.");
+      } else if (mode === "REHAB_STABILITY") {
+        setExercise("squats");
+        setDifficulty("rehab");
+        setTargetHoldDuration(1.5);
+        speakCoachCue("Rehab Stability Protocol engaged. Pacing locked, strict alignment required.");
+      }
+
+      setActiveView("ARENA");
+    },
+    [speakCoachCue]
+  );
+
+  const getGiantBannerState = useCallback((): BannerState => {
+    if (
+      combatBannerType === "EGO_LIFT" ||
+      combatBannerType === "FAULT" ||
+      combatBanner.includes("EGO") ||
+      combatBanner.includes("CAVE") ||
+      combatBanner.includes("VALGUS") ||
+      combatBanner.includes("PENALTY")
+    ) {
+      return "EGO_LIFT";
+    }
+    if (incomingAttack) {
+      return "PARRY_ATTACK";
+    }
+    if (holdProgress > 0 && holdProgress < 1) {
+      return "HOLD_POSITION";
+    }
+    if (
+      holdProgress >= 1 ||
+      combatBannerType === "CRIT" ||
+      combatBanner.includes("STAND") ||
+      combatBanner.includes("DEFLECT") ||
+      combatBanner.includes("COMPLETE")
+    ) {
+      return "STAND_UP";
+    }
+    return "SQUAT_DOWN";
+  }, [combatBannerType, combatBanner, incomingAttack, holdProgress]);
 
   // ---------------------------------------------------------------------------
   // Lifecycle Finite State Machine & Session Controls
@@ -2689,6 +2850,58 @@ export default function AthleteMindPage() {
 
     const width = canvas.width;
     const height = canvas.height;
+
+    // Track FPS
+    const nowTs = performance.now();
+    if (lastFrameTimeRef.current > 0) {
+      const deltaMs = nowTs - lastFrameTimeRef.current;
+      if (deltaMs > 0) {
+        const instantFps = 1000 / deltaMs;
+        fpsRef.current = fpsRef.current * 0.9 + instantFps * 0.1;
+      }
+    }
+    lastFrameTimeRef.current = nowTs;
+
+    // Periodically sync sensor diagnostics to React state (every 400ms)
+    if (nowTs - lastDiagnosticUpdateRef.current > 400) {
+      lastDiagnosticUpdateRef.current = nowTs;
+      setCurrentFps(Math.round(fpsRef.current || 60));
+
+      const lm = landmarksRef.current;
+      if (lm && Array.isArray(lm) && lm.length >= 29) {
+        const hipsV = ((lm[23]?.visibility || 0) + (lm[24]?.visibility || 0)) / 2;
+        const kneesV = ((lm[25]?.visibility || 0) + (lm[26]?.visibility || 0)) / 2;
+        const anklesV = ((lm[27]?.visibility || 0) + (lm[28]?.visibility || 0)) / 2;
+        const shouldersV = ((lm[11]?.visibility || 0) + (lm[12]?.visibility || 0)) / 2;
+        const overallV = (hipsV + kneesV + anklesV + shouldersV) / 4;
+
+        setJointVisibility({
+          hips: hipsV,
+          knees: kneesV,
+          ankles: anklesV,
+          shoulders: shouldersV,
+          overall: overallV,
+        });
+
+        if (hipsV > 0.35 && anklesV > 0.3) {
+          const topY = Math.min(lm[11]?.y || 0.2, lm[12]?.y || 0.2);
+          const bottomY = Math.max(lm[27]?.y || 0.8, lm[28]?.y || 0.8);
+          const span = bottomY - topY;
+
+          if (span >= 0.35 && span <= 0.78) {
+            setDistanceStatus("OPTIMAL");
+          } else if (span > 0.78 || bottomY > 0.97) {
+            setDistanceStatus("TOO_CLOSE");
+          } else {
+            setDistanceStatus("TOO_FAR");
+          }
+        } else {
+          setDistanceStatus("SEARCHING");
+        }
+      } else {
+        setDistanceStatus("SEARCHING");
+      }
+    }
 
     ctx.clearRect(0, 0, width, height);
 
@@ -3598,6 +3811,22 @@ export default function AthleteMindPage() {
 
         if (data.rep_count !== undefined) {
           setRepCount(data.rep_count);
+
+          // Circuit Mode Automatic Gauntlet Progression (Squats -> Overhead Press)
+          if (
+            activeCircuitModeRef.current === "FULL_BODY" &&
+            circuitStepRef.current === 1 &&
+            data.rep_count >= 5
+          ) {
+            circuitStepRef.current = 2;
+            setCircuitStep(2);
+            setExercise("overhead_press");
+            exerciseRef.current = "overhead_press";
+            speakCoachCue("Squats gauntlet cleared! Transitioning to Stage 2: Overhead Press. Deflect incoming vertical attacks!");
+            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({ action: "set_exercise", exercise: "overhead_press" }));
+            }
+          }
         }
 
         if (data.purity !== undefined) {
@@ -3947,21 +4176,130 @@ export default function AthleteMindPage() {
       <video ref={videoRef} className="hidden" playsInline muted autoPlay />
 
       {/* ------------------------------------------------------------------- */}
-      {/* 1. ULTRA-MINIMAL TOP BAR: STATUS CALLOUT & PAUSE CONTROLS           */}
+      {/* MODULAR MENU NAVIGATION SYSTEM & SUB-VIEWS                          */}
       {/* ------------------------------------------------------------------- */}
-      <header className="relative z-30 flex items-center justify-between px-6 py-2.5 bg-[#080d1a]/85 border-b border-slate-800/80 backdrop-blur-md h-14">
-        {/* Left: Pilot Status Callout */}
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-sm shadow-[0_0_10px_rgba(6,182,212,0.3)]">
-            🛡️
-          </div>
-          <div className="hidden sm:flex flex-col text-left font-mono">
-            <span className="text-xs font-black tracking-widest text-cyan-300">ATHLETEMIND</span>
-            <span className="text-[10px] text-slate-400 font-bold tracking-wider">
-              PILOT HP: <span className={playerHp > 30 ? "text-emerald-400" : "text-rose-400 animate-pulse"}>{playerHp}%</span>
-            </span>
-          </div>
-        </div>
+      {activeView === "MAIN_MENU" && (
+        <MainMenu
+          streak={adherence?.streakDays || 1}
+          unlockedAchievementsCount={achievementsList.filter((a) => a.unlocked).length}
+          totalAchievementsCount={achievementsList.length}
+          bioCredits={bioCredits}
+          energyCores={vault.energyCores}
+          callsign={callsign}
+          onNavigate={(view) => setActiveView(view)}
+        />
+      )}
+
+      {activeView === "CIRCUIT_SELECT" && (
+        <CircuitSelectView
+          onSelectMode={handleLaunchCircuit}
+          onBack={() => setActiveView("MAIN_MENU")}
+        />
+      )}
+
+      {activeView === "CAMERA_TEST" && (
+        <CameraTestView
+          canvasRef={canvasRef}
+          videoWidth={videoRef.current?.videoWidth || 640}
+          videoHeight={videoRef.current?.videoHeight || 480}
+          fps={currentFps}
+          jointVisibility={jointVisibility}
+          distanceStatus={distanceStatus}
+          onBack={() => setActiveView("MAIN_MENU")}
+          onLaunchArena={() => setActiveView("ARENA")}
+        />
+      )}
+
+      {activeView === "TELEMETRY" && (
+        <TelemetryView
+          angleTrace={angleTrace}
+          repCount={repCount}
+          formPurity={formPurity}
+          avgHoldDuration={
+            holdDurations.length > 0
+              ? holdDurations.reduce((a, b) => a + b, 0) / holdDurations.length
+              : targetHoldDuration
+          }
+          valgusCount={valgusCount}
+          minSessionAngle={minSessionAngle}
+          exercise={exercise}
+          difficulty={difficulty}
+          onBack={() => setActiveView("MAIN_MENU")}
+        />
+      )}
+
+      {activeView === "COMPARISON" && (
+        <ComparisonView
+          baselineSession={baselineSession}
+          recoveryHistory={recoveryHistory}
+          currentSession={{
+            minAngle: minSessionAngle < 180 ? minSessionAngle : 90,
+            holdDuration:
+              holdDurations.length > 0
+                ? Math.max(...holdDurations)
+                : targetHoldDuration,
+            valgusCount: valgusCount,
+            descentTime: 2.2,
+          }}
+          onBack={() => setActiveView("MAIN_MENU")}
+        />
+      )}
+
+      {activeView === "ACHIEVEMENTS" && (
+        <AchievementsView
+          achievements={achievementsList}
+          onBack={() => setActiveView("MAIN_MENU")}
+        />
+      )}
+
+      {activeView === "SETTINGS" && (
+        <SettingsView
+          activeSoundpack={vault.activeSoundpack}
+          activeShader={vault.activeShader}
+          isMuted={isMuted}
+          isRestDay={isRestDay}
+          energyCores={vault.energyCores}
+          onToggleMute={handleToggleMute}
+          onToggleRestDay={handleToggleRestDay}
+          onSelectSoundpack={handleBuyOrEquipSoundpack}
+          onSelectShader={handleBuyOrEquipShader}
+          onResetAllData={handleResetAllData}
+          onBack={() => setActiveView("MAIN_MENU")}
+        />
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* ARENA COMBAT & CALIBRATION VIEW                                     */}
+      {/* ------------------------------------------------------------------- */}
+      {activeView === "ARENA" && (
+        <>
+          <header className="relative z-30 flex items-center justify-between px-6 py-2.5 bg-[#080d1a]/85 border-b border-slate-800/80 backdrop-blur-md h-14">
+            {/* Left: Pilot Status Callout & Menu Navigation */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setActiveView("MAIN_MENU")}
+                className="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-cyan-500/20 border border-slate-700 hover:border-cyan-400 text-xs font-bold text-cyan-300 transition-all cursor-pointer flex items-center gap-1.5 shadow-lg mr-1"
+                title="Return to Main Menu"
+              >
+                <span>←</span>
+                <span>MENU</span>
+              </button>
+              <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-sm shadow-[0_0_10px_rgba(6,182,212,0.3)]">
+                🛡️
+              </div>
+              <div className="hidden sm:flex flex-col text-left font-mono">
+                <span className="text-xs font-black tracking-widest text-cyan-300">ATHLETEMIND</span>
+                <span className="text-[10px] text-slate-400 font-bold tracking-wider">
+                  PILOT HP: <span className={playerHp > 30 ? "text-emerald-400" : "text-rose-400 animate-pulse"}>{playerHp}%</span>
+                </span>
+              </div>
+              {activeCircuitMode && (
+                <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-950/80 border border-amber-500/50 text-[11px] font-bold text-amber-300">
+                  <span>⚡ CIRCUIT: {activeCircuitMode.replace("_", " ")}</span>
+                  {activeCircuitMode === "FULL_BODY" && <span>• STAGE {circuitStep}/2</span>}
+                </div>
+              )}
+            </div>
 
         {/* Center: Large High-Contrast Status Callout */}
         <div className="flex items-center justify-center">
@@ -4577,44 +4915,17 @@ export default function AthleteMindPage() {
             </div>
           )}
 
-          {/* Center Feedback Banner */}
-          <div className="absolute top-5 left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">
-            <div
-              className={`px-7 py-2.5 rounded-2xl border-2 backdrop-blur-md transition-all duration-200 uppercase font-black tracking-widest text-xs sm:text-sm flex items-center gap-2.5 shadow-2xl ${
-                combatBannerType === "EGO_LIFT"
-                  ? "bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_35px_rgba(244,63,94,0.7)] animate-bounce"
-                  : combatBannerType === "CRIT"
-                  ? "bg-emerald-950/90 border-emerald-400 text-emerald-200 shadow-[0_0_35px_rgba(52,211,153,0.7)] scale-105"
-                  : combatBannerType === "HOLD"
-                  ? "bg-cyan-950/90 border-cyan-400 text-cyan-200 shadow-[0_0_25px_rgba(6,182,212,0.5)]"
-                  : combatBannerType === "FAULT"
-                  ? "bg-amber-950/90 border-amber-500 text-amber-200 shadow-[0_0_25px_rgba(245,158,11,0.5)]"
-                  : "bg-slate-900/80 border-slate-700 text-slate-300 shadow-lg"
-              }`}
-            >
-              <span>
-                {combatBannerType === "EGO_LIFT"
-                  ? "⚠️"
-                  : combatBannerType === "CRIT"
-                  ? "💥"
-                  : combatBannerType === "HOLD"
-                  ? "⏱️"
-                  : combatBannerType === "FAULT"
-                  ? "⚡"
-                  : "🎯"}
-              </span>
-              <span>{combatBanner}</span>
-            </div>
-
-            {holdProgress > 0 && (
-              <div className="w-60 mx-auto mt-2 h-2 bg-slate-900/90 rounded-full overflow-hidden border border-cyan-400/40 p-0.5">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-amber-300 transition-all duration-75 shadow-[0_0_10px_rgba(251,191,36,0.8)]"
-                  style={{ width: `${Math.min(100, holdProgress * 100)}%` }}
-                />
-              </div>
-            )}
-          </div>
+          {/* Giant Dynamic Center Action Banner (Visible from 8+ Feet Away) */}
+          <GiantActionBanner
+            state={getGiantBannerState()}
+            holdProgress={holdProgress}
+            targetHoldDuration={targetHoldDuration}
+            customMessage={
+              combatBannerType === "EGO_LIFT"
+                ? "EGO LIFT / KNEE CAVE DETECTED"
+                : undefined
+            }
+          />
 
           <div className="absolute bottom-4 left-6 z-20 flex items-center gap-2 text-xs text-slate-400">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/70 border border-slate-700/80 backdrop-blur-md">
@@ -4651,6 +4962,8 @@ export default function AthleteMindPage() {
           </div>
         </div>
       </main>
+      </>
+      )}
 
       {/* ------------------------------------------------------------------- */}
       {/* 4. PHASE 5 CLINICIAN MODE / POST-MISSION DEBRIEF MODAL              */}
