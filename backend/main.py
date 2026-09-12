@@ -2028,10 +2028,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     if "REST_DAY" not in current_modifiers:
                         combat_engine.combo_streak = 0
                         combat_engine.damage_multiplier = 1.0
+                        damage = int(data.get("damage", 20))
+                        combat_engine.player_hp = max(0, combat_engine.player_hp - damage)
                 await websocket.send_json({
                     "event": "DEFLECTION_PROCESSED",
                     "success": success,
                     "boss_hp": combat_engine.boss_hp,
+                    "player_hp": combat_engine.player_hp,
                     "combo_streak": combat_engine.combo_streak,
                     "combo_multiplier": combat_engine.damage_multiplier,
                 })

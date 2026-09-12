@@ -1682,6 +1682,7 @@ export default function AthleteMindPage() {
 
   // Combat State
   const [playerHp, setPlayerHp] = useState(100);
+  const playerHpRef = useRef(100);
   const [bossHp, setBossHp] = useState(500);
   const [bossMaxHp, setBossMaxHp] = useState(500);
   const [bossAttackTimer, setBossAttackTimer] = useState(10.0);
@@ -2286,6 +2287,7 @@ export default function AthleteMindPage() {
   // Reset Session
   const handleResetCombat = useCallback(() => {
     const targetMaxHp = modifiersRef.current.includes("ENDURANCE_GAUNTLET") ? 1000 : 500;
+    playerHpRef.current = 100;
     setPlayerHp(100);
     setBossMaxHp(targetMaxHp);
     setBossHp(targetMaxHp);
@@ -2355,7 +2357,7 @@ export default function AthleteMindPage() {
     setIsShipExploding(true);
     shieldActiveRef.current = false;
     setIsShieldActiveState(false);
-    screenShakeRef.current = 50;
+    screenShakeRef.current = 15;
     synth.playShipExplosion();
     synth.playDefeat();
     speakCoachCue("Critical integrity failure! Vessel destroyed!");
@@ -2973,10 +2975,11 @@ export default function AthleteMindPage() {
               }
             } else {
               synth.playBossAttack();
-              screenShakeRef.current = 22;
+              screenShakeRef.current = 8;
 
               setPlayerHp((hp) => {
                 const nextHp = Math.max(0, hp - 20);
+                playerHpRef.current = nextHp;
                 if (nextHp <= 0) {
                   setMatchStatus("DEFEAT");
                   setShowClinicianModal(true);
@@ -3126,8 +3129,9 @@ export default function AthleteMindPage() {
     if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       ctx.save();
       if (screenShakeRef.current > 0) {
-        const dx = (Math.random() - 0.5) * screenShakeRef.current;
-        const dy = (Math.random() - 0.5) * screenShakeRef.current;
+        const clampedShake = Math.min(7, screenShakeRef.current);
+        const dx = (Math.random() - 0.5) * clampedShake;
+        const dy = (Math.random() - 0.5) * clampedShake;
         ctx.translate(dx, dy);
         screenShakeRef.current *= 0.86;
         if (screenShakeRef.current < 0.5) screenShakeRef.current = 0;
@@ -3693,7 +3697,7 @@ export default function AthleteMindPage() {
     const isHitStopActive = hitStopUntilRef.current > nowMs;
     const comX = width / 2;
     const comY = height * 0.55;
-    const perimeterRadius = 80;
+    const perimeterRadius = 55;
 
     if (gameStageRef.current === "ACTIVE_DEFLECTION") {
       if (nextProjectileTimeRef.current === 0) {
@@ -3725,9 +3729,9 @@ export default function AthleteMindPage() {
           sY = height * 0.25 + (Math.random() - 0.5) * 100;
         }
 
-        // Asteroids of various sizes (small: 24px, medium: 36px, large: 52px)
+        // Asteroids of various compact sizes (small: 14px, medium: 20px, large: 28px)
         const sizeRand = Math.random();
-        const radius = sizeRand < 0.35 ? 24 : sizeRand < 0.75 ? 36 : 52;
+        const radius = sizeRand < 0.35 ? 14 : sizeRand < 0.75 ? 20 : 28;
         const variant = sizeRand < 0.35 ? "SMALL" : sizeRand < 0.75 ? "MEDIUM" : "LARGE";
 
         projectilesRef.current.push({
@@ -3744,7 +3748,7 @@ export default function AthleteMindPage() {
           status: "FLYING",
           rotation: Math.random() * Math.PI * 2,
           rotSpeed: (Math.random() - 0.5) * 0.04,
-          sizeScale: radius / 36,
+          sizeScale: radius / 20,
           variant,
         });
         nextProjectileTimeRef.current = nowMs + 5800 + Math.random() * 1600;
@@ -3771,7 +3775,7 @@ export default function AthleteMindPage() {
           if (isShieldOnline) {
             p.status = "DEFLECTED";
             hitStopUntilRef.current = nowMs + 80;
-            screenShakeRef.current = 24;
+            screenShakeRef.current = 5;
             synth.playPerfectDeflect();
             synth.playShieldDischarge();
             spawnParticles(curX, curY, 45, "#00f0ff");
@@ -3810,9 +3814,9 @@ export default function AthleteMindPage() {
             p.status = "BREACHED";
             synth.playShieldBreach();
             shieldBreachFlashRef.current = nowMs + 400;
-            screenShakeRef.current = 24;
-            spawnParticles(curX, curY, 35, "#f59e0b");
-            spawnParticles(curX, curY, 25, "#ef4444");
+            screenShakeRef.current = 8;
+            spawnParticles(curX, curY, 25, "#f59e0b");
+            spawnParticles(curX, curY, 20, "#ef4444");
 
             if (!hasStoodUpSinceDeflectRef.current) {
               spawnFloatingText("HULL IMPACT — CAPACITOR EMPTY (STAND UP TO RESET)", curX, curY, "#ef4444", 26);
@@ -3825,17 +3829,16 @@ export default function AthleteMindPage() {
             if (isRestDayRef.current) {
               spawnFloatingText("🌿 RESTORATIVE SHIELD (0 DMG)", curX, curY + 32, "#10b981", 28);
             } else {
-              setPlayerHp((hp) => {
-                const nextHp = Math.max(0, hp - 20);
-                if (nextHp <= 0) {
-                  triggerShipExplosion();
-                }
-                return nextHp;
-              });
+              const nextHp = Math.max(0, playerHpRef.current - 20);
+              playerHpRef.current = nextHp;
+              setPlayerHp(nextHp);
+              if (nextHp <= 0) {
+                triggerShipExplosion();
+              }
             }
 
             if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-              socketRef.current.send(JSON.stringify({ action: "report_deflect", success: false }));
+              socketRef.current.send(JSON.stringify({ action: "report_deflect", success: false, damage: 20 }));
             }
           }
         }
@@ -4335,7 +4338,15 @@ export default function AthleteMindPage() {
           setTotalTensionTimeSec(data.total_tension_time_sec);
         }
         if (data.player_hp !== undefined && !isRestDayRef.current) {
-          setPlayerHp(data.player_hp);
+          if (gameStageRef.current === "ACTIVE_DEFLECTION") {
+            if (data.player_hp < playerHpRef.current) {
+              playerHpRef.current = data.player_hp;
+              setPlayerHp(data.player_hp);
+            }
+          } else {
+            playerHpRef.current = data.player_hp;
+            setPlayerHp(data.player_hp);
+          }
         }
         if (data.boss_state) {
           setBossState(data.boss_state);
@@ -4489,7 +4500,11 @@ export default function AthleteMindPage() {
             } else {
               synth.playStun();
               screenShakeRef.current = 18;
-              setPlayerHp((prev) => Math.max(0, prev - data.damage_taken!));
+              setPlayerHp((prev) => {
+                const next = Math.max(0, prev - data.damage_taken!);
+                playerHpRef.current = next;
+                return next;
+              });
               const canvas = canvasRef.current;
               if (canvas) {
                 spawnFloatingText(`-${data.damage_taken} HP STUN`, canvas.width / 2, canvas.height / 2 + 50, "#ff0055", 34);
