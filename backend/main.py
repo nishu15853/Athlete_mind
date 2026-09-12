@@ -335,6 +335,7 @@ class BaseExerciseEngine:
             "fault_type": fault_type,
             "valgus": bool(fault_type == "valgus"),
             "knee_caved_in": bool(fault_type == "valgus"),
+            "warning": "KNEES CAVING INWARD - DRIVE KNEES OUT" if fault_type == "valgus" else "",
             "weapon_overheated": overheated,
             "error": fault_type.upper() if has_fault else "",
             "message": message,
@@ -354,6 +355,13 @@ class SquatEngine(BaseExerciseEngine):
 
     def __init__(self, telemetry: Optional[SessionTelemetryStore] = None, difficulty: str = "standard"):
         super().__init__("squats", difficulty, telemetry)
+        self.y_hip_standing: Optional[float] = None
+        self.y_knee_standing: Optional[float] = None
+
+    def reset(self):
+        super().reset()
+        self.y_hip_standing = None
+        self.y_knee_standing = None
 
     def process(self, hip: Any, knee: Any, ankle: Any, shoulder: Any = None,
                 now: Optional[float] = None, right_hip: Any = None,
@@ -437,15 +445,27 @@ class SquatEngine(BaseExerciseEngine):
         # In Front View: knee flex projects along z-axis. Combine 3D angle with vertical hip drop level
         hip_y = float(hip[1])
         knee_y = float(knee[1])
-        # Normalized coords: y=0 top, y=1 bottom. When hip drops to knee level, hip_y approaches knee_y.
-        frontal_hip_drop_reached = bool(hip_y >= knee_y - 0.06)
+
+        # Standing posture check & reference tracking
+        is_standing = (knee_ang >= stand_min) and (hip_ang >= 140.0)
+        if is_standing or self.y_hip_standing is None:
+            self.y_hip_standing = hip_y
+            self.y_knee_standing = knee_y
+
+        # Depth Ratio = (y_hip - y_knee_standing) / (y_hip_standing - y_knee_standing)
+        depth_ratio = 0.0
+        if self.y_hip_standing is not None and self.y_knee_standing is not None:
+            denom = self.y_hip_standing - self.y_knee_standing
+            if abs(denom) > 1e-4:
+                depth_ratio = abs((hip_y - self.y_knee_standing) / denom)
+
+        # When y_hip drops to the horizontal level of y_knee, trigger squat bottom hold
+        hip_at_knee_level = bool(hip_y >= knee_y - 0.05) or (depth_ratio <= 0.25 and depth_ratio > 0)
 
         if view_mode == "front":
-            is_bottom_depth = (knee_ang <= bottom_depth_max or frontal_hip_drop_reached) and not valgus
+            is_bottom_depth = (knee_ang <= bottom_depth_max or hip_at_knee_level) and not valgus
         else:
             is_bottom_depth = (bottom_depth_min <= knee_ang <= bottom_depth_max) and (hip_ang < 100.0) and not valgus
-
-        is_standing = (knee_ang >= stand_min) and (hip_ang >= 140.0)
 
         # Anti Ego-Lift
         if raw_knee < 140.0 or knee_ang < 145.0:
