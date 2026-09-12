@@ -12,6 +12,8 @@ import { CircuitSelectView, CircuitMode } from "@/components/CircuitSelectView";
 import { SettingsView } from "@/components/SettingsView";
 import { ClinicalSoapCard } from "@/components/ClinicalSoapCard";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
+import { RocketBlueprintHUD } from "@/components/RocketBlueprintHUD";
+import { FuturisticCockpitFrame } from "@/components/FuturisticCockpitFrame";
 import {
   EXERCISE_CONFIGS,
   EXERCISE_REGISTRY,
@@ -376,6 +378,10 @@ export interface KineticProjectile {
   radius: number;
   color: string;
   status: "FLYING" | "DEFLECTED" | "BREACHED";
+  rotation?: number;
+  rotSpeed?: number;
+  sizeScale?: number;
+  variant?: "SMALL" | "MEDIUM" | "LARGE";
 }
 
 const DEFAULT_CLINICAL_BADGES: ClinicalBadge[] = [
@@ -1721,7 +1727,16 @@ export default function AthleteMindPage() {
   // Fast-Access Refs for Campaign & Interactive Calibration
   const gameStageRef = useRef<CampaignStage>("PROLOGUE");
   const projectilesRef = useRef<KineticProjectile[]>([]);
+  const asteroidImgRef = useRef<HTMLImageElement | null>(null);
   const nextProjectileTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const img = new Image();
+      img.src = "/asteroid.png";
+      asteroidImgRef.current = img;
+    }
+  }, []);
   const hitStopUntilRef = useRef<number>(0);
   const shieldBreachFlashRef = useRef<number>(0);
   const calibrationGreenFlashRef = useRef<number>(0);
@@ -3548,22 +3563,57 @@ export default function AthleteMindPage() {
 
     if (gameStageRef.current === "ACTIVE_DEFLECTION") {
       if (nextProjectileTimeRef.current === 0) {
-        nextProjectileTimeRef.current = nowMs + 2000;
+        nextProjectileTimeRef.current = nowMs + 1800;
       } else if (nowMs >= nextProjectileTimeRef.current && !isHitStopActive) {
+        // Multi-directional spawn trajectories (top-left, top-center, top-right, left flank, right flank)
+        const spawnDirRand = Math.random();
+        let sX = width * 0.5;
+        let sY = -50;
+        if (spawnDirRand < 0.25) {
+          // Top-left vector
+          sX = width * 0.15 + (Math.random() - 0.5) * 80;
+          sY = -50;
+        } else if (spawnDirRand < 0.55) {
+          // Top-center vector
+          sX = width * 0.5 + (Math.random() - 0.5) * 140;
+          sY = -50;
+        } else if (spawnDirRand < 0.8) {
+          // Top-right vector
+          sX = width * 0.85 + (Math.random() - 0.5) * 80;
+          sY = -50;
+        } else if (spawnDirRand < 0.9) {
+          // Left flank vector
+          sX = -50;
+          sY = height * 0.25 + (Math.random() - 0.5) * 100;
+        } else {
+          // Right flank vector
+          sX = width + 50;
+          sY = height * 0.25 + (Math.random() - 0.5) * 100;
+        }
+
+        // Asteroids of various sizes (small: 24px, medium: 36px, large: 52px)
+        const sizeRand = Math.random();
+        const radius = sizeRand < 0.35 ? 24 : sizeRand < 0.75 ? 36 : 52;
+        const variant = sizeRand < 0.35 ? "SMALL" : sizeRand < 0.75 ? "MEDIUM" : "LARGE";
+
         projectilesRef.current.push({
-          id: `proj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          startX: width / 2 + (Math.random() - 0.5) * 80,
-          startY: 20,
+          id: `ast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          startX: sX,
+          startY: sY,
           targetX: comX,
           targetY: comY,
           progress: 0.0,
           duration: 4000,
           spawnTime: nowMs,
-          radius: 16,
-          color: "#00f0ff",
+          radius,
+          color: "#f59e0b",
           status: "FLYING",
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 0.04,
+          sizeScale: radius / 36,
+          variant,
         });
-        nextProjectileTimeRef.current = nowMs + 6500 + Math.random() * 1500;
+        nextProjectileTimeRef.current = nowMs + 5800 + Math.random() * 1600;
       }
     }
 
@@ -3573,6 +3623,9 @@ export default function AthleteMindPage() {
       if (p.status === "FLYING") {
         if (gameStageRef.current === "ACTIVE_DEFLECTION" && !isHitStopActive) {
           p.progress = Math.min(1.0, (nowMs - p.spawnTime) / p.duration);
+        }
+        if (p.rotSpeed) {
+          p.rotation = (p.rotation || 0) + p.rotSpeed;
         }
         const curX = p.startX + (p.targetX - p.startX) * p.progress;
         const curY = p.startY + (p.targetY - p.startY) * p.progress;
@@ -3593,9 +3646,10 @@ export default function AthleteMindPage() {
             hitStopUntilRef.current = nowMs + 80;
             screenShakeRef.current = 24;
             synth.playPerfectDeflect();
-            spawnParticles(curX, curY, 45, "#00f0ff");
+            spawnParticles(curX, curY, 40, "#00f0ff");
             spawnParticles(curX, curY, 25, "#ffd700");
-            spawnFloatingText("+1 PERFECT DEFLECT!", curX, curY - 24, "#00f0ff", 36);
+            spawnParticles(curX, curY, 25, "#78716c");
+            spawnFloatingText("+1 ASTEROID DEFLECTED!", curX, curY - 24, "#00f0ff", 36);
 
             deflectionsCompletedRef.current += 1;
             setDeflectionsCompleted((c) => c + 1);
@@ -3616,12 +3670,13 @@ export default function AthleteMindPage() {
             shieldBreachFlashRef.current = nowMs + 400;
             screenShakeRef.current = 16;
             spawnParticles(curX, curY, 30, "#f59e0b");
-            spawnFloatingText("SHIELD BREACHED — STABILIZE DEPTH", curX, curY, "#f59e0b", 30);
+            spawnParticles(curX, curY, 20, "#78716c");
+            spawnFloatingText("HULL IMPACT — ASTEROID BREACH", curX, curY, "#f59e0b", 30);
 
             if (isRestDayRef.current) {
               spawnFloatingText("🌿 RESTORATIVE SHIELD (0 DMG)", curX, curY + 32, "#10b981", 28);
             } else {
-              setPlayerHp((hp) => Math.max(0, hp - 10));
+              setPlayerHp((hp) => Math.max(0, hp - 12));
             }
 
             if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -3632,32 +3687,43 @@ export default function AthleteMindPage() {
 
         if (p.status === "FLYING") {
           ctx.save();
+          // Atmospheric friction and dust trail behind incoming asteroid
           for (let step = 1; step <= 3; step++) {
-            const tailProgress = Math.max(0, p.progress - step * 0.03);
+            const tailProgress = Math.max(0, p.progress - step * 0.035);
             const tx = p.startX + (p.targetX - p.startX) * tailProgress;
             const ty = p.startY + (p.targetY - p.startY) * tailProgress;
             ctx.beginPath();
             ctx.arc(tx, ty, p.radius * (1 - step * 0.22), 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(0, 240, 255, ${0.45 - step * 0.12})`;
+            ctx.fillStyle = `rgba(245, 158, 11, ${0.35 - step * 0.1})`;
             ctx.fill();
           }
 
-          const orbGrad = ctx.createRadialGradient(curX, curY, 2, curX, curY, p.radius);
-          orbGrad.addColorStop(0, "#ffffff");
-          orbGrad.addColorStop(0.4, "#00f0ff");
-          orbGrad.addColorStop(1, "rgba(0, 240, 255, 0)");
-          ctx.beginPath();
-          ctx.arc(curX, curY, p.radius, 0, Math.PI * 2);
-          ctx.fillStyle = orbGrad;
-          ctx.shadowColor = "#00f0ff";
-          ctx.shadowBlur = 18;
-          ctx.fill();
+          // Draw rotating textured 3D cratered asteroid rock
+          ctx.translate(curX, curY);
+          ctx.rotate(p.rotation || 0);
 
-          ctx.beginPath();
-          ctx.arc(curX, curY, p.radius + 3, 0, Math.PI * 2);
-          ctx.strokeStyle = "#ffffff";
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
+          if (asteroidImgRef.current && asteroidImgRef.current.complete) {
+            ctx.shadowColor = "#f59e0b";
+            ctx.shadowBlur = 14;
+            ctx.drawImage(
+              asteroidImgRef.current,
+              -p.radius,
+              -p.radius,
+              p.radius * 2,
+              p.radius * 2
+            );
+          } else {
+            // High-contrast rocky fallback
+            ctx.beginPath();
+            ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+            ctx.fillStyle = "#57534e";
+            ctx.shadowColor = "#f59e0b";
+            ctx.shadowBlur = 12;
+            ctx.fill();
+            ctx.strokeStyle = "#d97706";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
           ctx.restore();
         }
       } else {
@@ -4652,11 +4718,18 @@ export default function AthleteMindPage() {
       )}
 
       {/* ------------------------------------------------------------------- */}
-      {/* 2. MAIN ARENA VIEWPORT (MAX VERTICAL HEIGHT, LATERAL HUDS)         */}
+      {/* 2. MAIN ARENA VIEWPORT (FUTURISTIC COCKPIT FRAME & ROCKET BLUEPRINT) */}
       {/* ------------------------------------------------------------------- */}
       <main className="relative flex-1 w-full h-[calc(100vh-3.5rem)] flex items-center justify-center p-0 bg-[#050811] overflow-hidden">
-        <div
-          className={`relative h-[92vh] max-h-[92vh] max-w-full aspect-[4/3] md:aspect-[16/9] mx-auto rounded-3xl overflow-hidden border-2 transition-all duration-500 bg-black shadow-2xl ${
+        <FuturisticCockpitFrame
+          currentAngle={primaryAngle}
+          targetAngle={(EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"]).targetAngle || 90}
+          formPurity={formPurity}
+          holdProgress={holdProgress}
+          exerciseName={(EXERCISE_REGISTRY[activeExerciseRef.current] || EXERCISE_REGISTRY["squats"]).name}
+          torsoTilt={0}
+          isShieldActive={isDepthTargetMet || isHolding || holdProgress > 0}
+          className={`h-[92vh] max-h-[92vh] max-w-full aspect-[4/3] md:aspect-[16/9] mx-auto shadow-2xl transition-all duration-500 ${
             isEnraged
               ? "border-rose-500/80 shadow-[0_0_60px_rgba(244,63,94,0.4)]"
               : "border-cyan-500/30 shadow-[0_0_50px_rgba(0,240,255,0.12)]"
@@ -4674,42 +4747,30 @@ export default function AthleteMindPage() {
             <div className="absolute inset-0 z-35 bg-rose-600/35 pointer-events-none mix-blend-screen animate-pulse backdrop-invert" />
           )}
 
-          {/* Left Lateral HUD (High-Contrast Metrics Readable from 5+ Feet Away) */}
-          <div className="absolute top-4 left-4 z-20 w-48 flex flex-col gap-3 pointer-events-auto">
-            {/* REPS */}
-            <div className="bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col">
-              <div className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1">REPS</div>
-              <div className="text-5xl font-black text-cyan-400 font-mono tracking-tight">
-                {repCount.toString().padStart(2, "0")}
-              </div>
-            </div>
+          {/* Left Lateral HUD: Rocket Blueprint Schematic & Combat Metrics */}
+          <div className="absolute top-3 left-3 z-25 flex flex-col gap-2 pointer-events-auto max-w-[190px] sm:max-w-[210px]">
+            <RocketBlueprintHUD
+              playerHp={playerHp}
+              playerMaxHp={100}
+              isShieldActive={isDepthTargetMet || isHolding || holdProgress > 0}
+              shieldHoldProgress={holdProgress}
+              isBreached={(shieldBreachFlashRef.current > performance.now()) || screenGlitch}
+            />
 
-            {/* PURITY */}
-            <div className="bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col">
-              <div className="text-xs text-slate-400 font-bold uppercase mb-1">PURITY</div>
-              <div className="text-4xl font-black text-emerald-400 font-mono tracking-tight">
-                {formPurity}%
+            {/* Quick Tactical Metrics: REPS & STREAK */}
+            <div className="grid grid-cols-2 gap-1.5 w-full">
+              <div className="bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 rounded-xl p-2 flex flex-col items-center justify-center text-center shadow-lg">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">REPS</span>
+                <span className="text-3xl font-black text-cyan-400 font-mono leading-none mt-0.5">
+                  {repCount.toString().padStart(2, "0")}
+                </span>
               </div>
-            </div>
-
-            {/* STREAK */}
-            <div className="bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col">
-              <div className="text-xs text-slate-400 font-bold uppercase mb-1">STREAK</div>
-              <div className="text-3xl font-black text-amber-400 font-mono tracking-tight flex items-center gap-1.5">
-                <span>🔥</span>
-                <span>{comboStreak > 0 ? `${comboStreak}x` : "1x"}</span>
-              </div>
-            </div>
-
-            {/* DROP / DEPTH ANGLE */}
-            <div className="bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col">
-              <div className="text-xs text-slate-400 font-bold uppercase mb-1">
-                {activeProfile === "SIDE" ? "DEPTH ANGLE" : "DROP ANGLE"}
-              </div>
-              <div className="text-2xl font-bold text-white font-mono tracking-tight">
-                {activeProfile === "SIDE"
-                  ? `${Math.round(profileMetricValue || primaryAngle)}° / 90°`
-                  : `${Math.round(profileMetricValue)}% / 28%`}
+              <div className="bg-slate-950/85 backdrop-blur-md border border-amber-500/40 rounded-xl p-2 flex flex-col items-center justify-center text-center shadow-lg">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">STREAK</span>
+                <span className="text-2xl font-black text-amber-400 font-mono leading-none mt-0.5 flex items-center justify-center gap-1">
+                  <span>🔥</span>
+                  <span>{comboStreak > 0 ? `${comboStreak}x` : "1x"}</span>
+                </span>
               </div>
             </div>
           </div>
@@ -5219,23 +5280,25 @@ export default function AthleteMindPage() {
             );
           })()}
 
-          <div className="absolute bottom-4 left-6 z-20 flex items-center gap-2 text-xs text-slate-400">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/70 border border-slate-700/80 backdrop-blur-md">
+          {/* Bottom Cockpit Quick Badges (Sensor & Profile) */}
+          <div className="absolute bottom-3 left-4 z-30 flex items-center gap-2 text-xs text-slate-400 pointer-events-auto">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/80 border border-slate-700/80 backdrop-blur-md">
               <span className={`w-2 h-2 rounded-full ${cameraActive ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
-              <span className="text-[11px] font-mono font-semibold">{cameraActive ? "3D SENSOR ACTIVE" : "INITIALIZING CAMERA..."}</span>
+              <span className="text-[10px] font-mono font-semibold">{cameraActive ? "3D SENSOR ACTIVE" : "INITIALIZING CAMERA..."}</span>
             </div>
-            <div className="px-2.5 py-1.5 rounded-full bg-black/70 border border-cyan-500/40 backdrop-blur-md text-cyan-300 text-[10px] font-mono font-bold">
+            <div className="px-2.5 py-1.5 rounded-full bg-black/80 border border-cyan-500/40 backdrop-blur-md text-cyan-300 text-[10px] font-mono font-bold">
               {activeProfile === "SIDE" ? "SAGITTAL (SIDE)" : "CORONAL (FRONT)"}
             </div>
           </div>
 
-          <div className="absolute bottom-4 right-6 z-20 flex items-center gap-2">
+          {/* Bottom Cockpit Tactical Buttons (Coach, Audio, Debrief, Vault) */}
+          <div className="absolute bottom-3 right-4 z-30 flex items-center gap-2 pointer-events-auto">
             <button
               onClick={() => setAiAudioGuidance((prev) => !prev)}
               className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md ${
                 aiAudioGuidance
-                  ? "bg-emerald-950/70 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
-                  : "bg-black/70 hover:bg-black/90 border-slate-700 text-slate-400"
+                  ? "bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                  : "bg-black/80 hover:bg-black/95 border-slate-700 text-slate-400"
               }`}
               title="Toggle Reactive AI Biomechanical Audio Guidance"
             >
@@ -5243,27 +5306,27 @@ export default function AthleteMindPage() {
             </button>
             <button
               onClick={handleToggleMute}
-              className="px-3 py-1.5 rounded-xl bg-black/70 hover:bg-black/90 border border-slate-700 hover:border-cyan-400 text-xs text-slate-300 font-mono transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
+              className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black/95 border border-slate-700 hover:border-cyan-400 text-xs text-slate-300 font-mono transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
               title="Toggle Audio Feedback"
             >
               <span>{isMuted ? "🔇 MUTED" : "🔊 COACH AUDIO"}</span>
             </button>
             <button
               onClick={() => setShowClinicianModal(true)}
-              className="px-3 py-1.5 rounded-xl bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/50 hover:border-cyan-400 text-xs text-cyan-300 font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
+              className="px-3 py-1.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 hover:border-cyan-400 text-xs text-cyan-300 font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
               title="Open Clinician Telemetry Debrief"
             >
               <span>📊 DEBRIEF</span>
             </button>
             <button
               onClick={() => setShowVaultModal(true)}
-              className="px-3 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900 border border-purple-500/50 hover:border-purple-400 text-xs text-purple-300 font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
+              className="px-3 py-1.5 rounded-xl bg-purple-950/80 hover:bg-purple-900 border border-purple-500/50 hover:border-purple-400 text-xs text-purple-300 font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
               title="Open Armory Vault"
             >
               <span>🛡️ VAULT</span>
             </button>
           </div>
-        </div>
+        </FuturisticCockpitFrame>
       </main>
       </>
       )}
