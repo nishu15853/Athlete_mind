@@ -30,40 +30,40 @@ export const CameraTestView: React.FC<CameraTestViewProps> = ({
   onLaunchArena,
 }) => {
   return (
-    <div className="relative w-full h-full min-h-screen bg-[#050811] text-white flex flex-col font-mono select-none overflow-hidden">
+    <div className="relative w-full h-full min-h-screen bg-[#050811] text-white flex flex-col font-mono select-none overflow-y-auto">
       {/* Top Header */}
-      <header className="relative z-30 flex items-center justify-between px-6 py-3 bg-[#080d1a]/90 border-b border-slate-800/80 backdrop-blur-md">
+      <header className="relative z-30 flex flex-wrap items-center justify-between px-3 sm:px-6 py-2 sm:py-3 bg-[#080d1a]/90 border-b border-slate-800/80 backdrop-blur-md gap-2">
         {/* Back Button */}
         <button
           onClick={onBack}
-          className="px-4 py-2 rounded-xl bg-slate-900/90 hover:bg-cyan-500/20 border border-slate-700 hover:border-cyan-400 text-xs font-bold text-cyan-300 transition-all cursor-pointer flex items-center gap-2 shadow-lg"
+          className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-slate-900/90 hover:bg-cyan-500/20 border border-slate-700 hover:border-cyan-400 text-[10px] sm:text-xs font-bold text-cyan-300 transition-all cursor-pointer flex items-center gap-1.5 sm:gap-2 shadow-lg"
         >
           <span>←</span>
-          <span>BACK TO MENU</span>
+          <span>BACK</span>
         </button>
 
         {/* Center Title */}
-        <div className="flex items-center gap-2">
-          <span className="text-xl">📷</span>
-          <span className="text-sm sm:text-base font-black tracking-widest text-cyan-300 uppercase">
-            SENSOR DIAGNOSTICS & HARDWARE CALIBRATION
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <span className="text-base sm:text-xl">📷</span>
+          <span className="text-xs sm:text-sm md:text-base font-black tracking-wider sm:tracking-widest text-cyan-300 uppercase truncate max-w-[50vw] sm:max-w-none">
+            SENSOR DIAGNOSTICS & CALIBRATION
           </span>
         </div>
 
         {/* Action Button */}
         <button
           onClick={onLaunchArena}
-          className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-black text-xs uppercase tracking-widest cursor-pointer shadow-[0_0_20px_rgba(0,240,255,0.6)] transition-all flex items-center gap-2 transform hover:scale-105"
+          className="px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-black text-[10px] sm:text-xs uppercase tracking-wider sm:tracking-widest cursor-pointer shadow-[0_0_20px_rgba(0,240,255,0.6)] transition-all flex items-center gap-1.5 sm:gap-2 transform hover:scale-105"
         >
           <span>⚔️</span>
-          <span>ENTER ARENA</span>
+          <span>ARENA</span>
         </button>
       </header>
 
       {/* Main Container: Split View or Overlaid Feed */}
-      <div className="relative flex-1 w-full h-full flex flex-col lg:flex-row items-center justify-center p-4 gap-4 overflow-hidden">
+      <div className="relative flex-1 w-full h-full flex flex-col lg:flex-row items-center justify-center p-3 sm:p-4 gap-4 overflow-visible lg:overflow-hidden">
         {/* Center/Left: Live Mirrored Canvas Feed with Distance Bounding Box */}
-        <div className="relative flex-1 h-[70vh] lg:h-[84vh] w-full max-w-5xl aspect-[4/3] md:aspect-[16/9] mx-auto rounded-3xl overflow-hidden border-2 border-cyan-500/40 bg-black shadow-[0_0_50px_rgba(0,240,255,0.15)] flex items-center justify-center">
+        <div className="relative flex-1 h-[45vh] sm:h-[60vh] lg:h-[84vh] w-full max-w-5xl aspect-[4/3] md:aspect-[16/9] mx-auto rounded-2xl sm:rounded-3xl overflow-hidden border-2 border-cyan-500/40 bg-black shadow-[0_0_50px_rgba(0,240,255,0.15)] flex items-center justify-center">
           <canvas
             ref={canvasRef}
             width={1280}

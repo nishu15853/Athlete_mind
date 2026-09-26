@@ -50,30 +50,30 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full min-h-screen bg-[#050811] text-white flex flex-col font-mono select-none overflow-y-auto p-4 sm:p-6">
+    <div className="relative w-full h-full min-h-screen bg-[#050811] text-white flex flex-col font-mono select-none overflow-y-auto p-3 sm:p-6">
       {/* Top Navigation Header */}
-      <header className="relative z-20 w-full max-w-6xl mx-auto flex items-center justify-between pb-6 border-b border-slate-800">
+      <header className="relative z-20 w-full max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3 pb-4 sm:pb-6 border-b border-slate-800">
         <button
           onClick={onBack}
-          className="px-4 py-2 rounded-xl bg-slate-900/90 hover:bg-yellow-500/20 border border-slate-700 hover:border-yellow-400 text-xs font-bold text-yellow-300 transition-all cursor-pointer flex items-center gap-2 shadow-lg"
+          className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-slate-900/90 hover:bg-yellow-500/20 border border-slate-700 hover:border-yellow-400 text-[10px] sm:text-xs font-bold text-yellow-300 transition-all cursor-pointer flex items-center gap-1.5 sm:gap-2 shadow-lg"
         >
           <span>←</span>
-          <span>BACK TO MENU</span>
+          <span>MENU</span>
         </button>
 
-        <div className="flex items-center gap-2.5">
-          <span className="text-2xl">🏆</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xl sm:text-2xl">🏆</span>
           <div className="flex flex-col text-left sm:text-right">
-            <h1 className="text-base sm:text-xl font-black text-yellow-300 uppercase tracking-widest">
+            <h1 className="text-xs sm:text-base md:text-xl font-black text-yellow-300 uppercase tracking-wider sm:tracking-widest">
               HALL OF ACHIEVEMENTS
             </h1>
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider">
+            <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase tracking-wider">
               10 CLINICAL & ARCADE MASTERY HONORS
             </span>
           </div>
         </div>
 
-        <div className="px-3.5 py-1.5 rounded-xl bg-yellow-950/70 border border-yellow-500/60 text-xs font-black text-yellow-300 shadow-[0_0_15px_rgba(234,179,8,0.3)]">
+        <div className="px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-yellow-950/70 border border-yellow-500/60 text-[10px] sm:text-xs font-black text-yellow-300 shadow-[0_0_15px_rgba(234,179,8,0.3)]">
           {unlockedCount} / {achievements.length} UNLOCKED
         </div>
       </header>

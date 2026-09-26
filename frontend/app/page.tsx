@@ -4855,18 +4855,18 @@ export default function AthleteMindPage() {
       {/* ------------------------------------------------------------------- */}
       {activeView === "ARENA" && (
         <>
-          <header className="relative z-30 flex items-center justify-between px-6 py-2.5 bg-[#080d1a]/85 border-b border-slate-800/80 backdrop-blur-md h-14">
+          <header className="relative z-30 flex items-center justify-between px-2.5 sm:px-6 py-1.5 sm:py-2.5 bg-[#080d1a]/85 border-b border-slate-800/80 backdrop-blur-md min-h-12 sm:min-h-14 gap-2">
             {/* Left: Pilot Status Callout & Menu Navigation */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3">
               <button
                 onClick={() => setActiveView("MAIN_MENU")}
-                className="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-cyan-500/20 border border-slate-700 hover:border-cyan-400 text-xs font-bold text-cyan-300 transition-all cursor-pointer flex items-center gap-1.5 shadow-lg mr-1"
+                className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-slate-900/90 hover:bg-cyan-500/20 border border-slate-700 hover:border-cyan-400 text-[10px] sm:text-xs font-bold text-cyan-300 transition-all cursor-pointer flex items-center gap-1 sm:gap-1.5 shadow-lg"
                 title="Return to Main Menu"
               >
                 <span>←</span>
-                <span>MENU</span>
+                <span className="hidden xs:inline">MENU</span>
               </button>
-              <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-sm shadow-[0_0_10px_rgba(6,182,212,0.3)]">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-xs sm:text-sm shadow-[0_0_10px_rgba(6,182,212,0.3)]">
                 🛡️
               </div>
               <div className="hidden sm:flex flex-col text-left font-mono">
@@ -4875,6 +4875,11 @@ export default function AthleteMindPage() {
                   PILOT HP: <span className={playerHp > 30 ? "text-emerald-400" : "text-rose-400 animate-pulse"}>{playerHp}%</span>
                 </span>
               </div>
+              {/* Compact HP badge for mobile */}
+              <div className="sm:hidden px-2 py-0.5 rounded-md bg-slate-900/90 border border-slate-700 text-[10px] font-mono font-bold">
+                <span className={playerHp > 30 ? "text-emerald-400" : "text-rose-400 animate-pulse"}>{playerHp}% HP</span>
+              </div>
+
               {activeCircuitMode && (
                 <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-950/80 border border-amber-500/50 text-[11px] font-bold text-amber-300">
                   <span>⚡ CIRCUIT: {activeCircuitMode.replace("_", " ")}</span>
@@ -4883,19 +4888,19 @@ export default function AthleteMindPage() {
               )}
               <button
                 onClick={() => setShowExerciseSelector(true)}
-                className="px-3 py-1.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 hover:border-cyan-400 text-xs font-mono font-bold text-cyan-300 transition-all cursor-pointer flex items-center gap-1.5 shadow-md group"
+                className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 hover:border-cyan-400 text-[10px] sm:text-xs font-mono font-bold text-cyan-300 transition-all cursor-pointer flex items-center gap-1 sm:gap-1.5 shadow-md group"
                 title="Change Clinical Exercise Protocol"
               >
                 <span>{getExerciseConfig(exercise).icon}</span>
                 <span className="hidden md:inline uppercase">{getExerciseConfig(exercise).name}</span>
-                <span className="text-[10px] text-cyan-400/80 group-hover:text-white">▾</span>
+                <span className="text-[9px] sm:text-[10px] text-cyan-400/80 group-hover:text-white">▾</span>
               </button>
             </div>
 
         {/* Center: Large High-Contrast Status Callout */}
-        <div className="flex items-center justify-center">
-          <div className="text-center font-mono">
-            <div className="text-base sm:text-xl font-black text-cyan-300 tracking-widest uppercase animate-pulse flex items-center gap-2">
+        <div className="flex items-center justify-center flex-1 max-w-[45vw] sm:max-w-none">
+          <div className="text-center font-mono truncate">
+            <div className="text-xs sm:text-base md:text-xl font-black text-cyan-300 tracking-wider sm:tracking-widest uppercase animate-pulse truncate">
               <span>
                 {gameStage === "PAUSED"
                   ? "⏸️ MOTOR SYNC PAUSED"
@@ -4920,7 +4925,7 @@ export default function AthleteMindPage() {
         </div>
 
         {/* Right: Subtle Pause / Resume Control */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
           <button
             onClick={() => {
               if (gameStage === "ACTIVE_DEFLECTION" || gameStage === "PAUSED") {
@@ -4931,7 +4936,7 @@ export default function AthleteMindPage() {
                 handleRestartCampaign();
               }
             }}
-            className={`px-4 py-1.5 rounded-xl border text-xs font-mono font-black tracking-wider transition-all cursor-pointer flex items-center gap-2 shadow-lg ${
+            className={`px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-lg sm:rounded-xl border text-[10px] sm:text-xs font-mono font-black tracking-wider transition-all cursor-pointer flex items-center gap-1.5 shadow-lg ${
               gameStage === "PAUSED"
                 ? "bg-cyan-500 hover:bg-cyan-400 border-cyan-400 text-black shadow-[0_0_15px_rgba(0,240,255,0.6)] animate-pulse"
                 : "bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-300 hover:text-white"
@@ -5013,7 +5018,7 @@ export default function AthleteMindPage() {
           )}
 
           {/* Left Lateral HUD: Rocket Blueprint Schematic & Combat Metrics */}
-          <div className="absolute top-3 left-3 z-25 flex flex-col gap-2 pointer-events-auto max-w-[190px] sm:max-w-[210px]">
+          <div className="absolute top-2 sm:top-3 left-2 sm:left-3 z-25 flex flex-col gap-1.5 sm:gap-2 pointer-events-auto scale-[0.78] sm:scale-90 md:scale-100 origin-top-left max-w-[170px] sm:max-w-[210px]">
             <RocketBlueprintHUD
               playerHp={playerHp}
               playerMaxHp={100}
@@ -5025,16 +5030,16 @@ export default function AthleteMindPage() {
             />
 
             {/* Quick Tactical Metrics: REPS & STREAK */}
-            <div className="grid grid-cols-2 gap-1.5 w-full">
-              <div className="bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 rounded-xl p-2 flex flex-col items-center justify-center text-center shadow-lg">
-                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">REPS</span>
-                <span className="text-3xl font-black text-cyan-400 font-mono leading-none mt-0.5">
+            <div className="grid grid-cols-2 gap-1 sm:gap-1.5 w-full">
+              <div className="bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 rounded-lg sm:rounded-xl p-1.5 sm:p-2 flex flex-col items-center justify-center text-center shadow-lg">
+                <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase tracking-wider">REPS</span>
+                <span className="text-2xl sm:text-3xl font-black text-cyan-400 font-mono leading-none mt-0.5">
                   {repCount.toString().padStart(2, "0")}
                 </span>
               </div>
-              <div className="bg-slate-950/85 backdrop-blur-md border border-amber-500/40 rounded-xl p-2 flex flex-col items-center justify-center text-center shadow-lg">
-                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">STREAK</span>
-                <span className="text-2xl font-black text-amber-400 font-mono leading-none mt-0.5 flex items-center justify-center gap-1">
+              <div className="bg-slate-950/85 backdrop-blur-md border border-amber-500/40 rounded-lg sm:rounded-xl p-1.5 sm:p-2 flex flex-col items-center justify-center text-center shadow-lg">
+                <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase tracking-wider">STREAK</span>
+                <span className="text-xl sm:text-2xl font-black text-amber-400 font-mono leading-none mt-0.5 flex items-center justify-center gap-1">
                   <span>🔥</span>
                   <span>{comboStreak > 0 ? `${comboStreak}x` : "1x"}</span>
                 </span>
@@ -5043,28 +5048,28 @@ export default function AthleteMindPage() {
           </div>
 
           {/* Right Lateral HUD (Deflections, Boss HP, Strike Alert, Restart) */}
-          <div className="absolute top-4 right-4 z-20 w-52 flex flex-col gap-3 text-right items-end pointer-events-auto">
+          <div className="absolute top-2 sm:top-4 right-2 sm:right-4 z-20 w-40 sm:w-48 md:w-52 flex flex-col gap-1.5 sm:gap-2.5 md:gap-3 text-right items-end pointer-events-auto scale-[0.78] sm:scale-90 md:scale-100 origin-top-right">
             {/* DEFLECTED */}
-            <div className="w-full bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col items-end">
-              <div className="text-xs text-slate-400 font-bold uppercase mb-1">DEFLECTED</div>
-              <div className="text-4xl font-black text-cyan-400 font-mono tracking-tight flex items-center gap-2">
-                <span className="text-2xl">🛡️</span>
+            <div className="w-full bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 md:p-4 shadow-xl flex flex-col items-end">
+              <div className="text-[10px] sm:text-xs text-slate-400 font-bold uppercase mb-0.5 sm:mb-1">DEFLECTED</div>
+              <div className="text-2xl sm:text-3xl md:text-4xl font-black text-cyan-400 font-mono tracking-tight flex items-center gap-1.5 sm:gap-2">
+                <span className="text-lg sm:text-2xl">🛡️</span>
                 <span>{deflectionsCompleted} / {deflectionsTarget}</span>
               </div>
             </div>
 
             {/* BOSS / ANOMALY HP */}
-            <div className="w-full bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 shadow-xl flex flex-col items-end">
-              <div className="text-xs text-slate-400 font-bold uppercase mb-1 flex items-center gap-1">
+            <div className="w-full bg-slate-950/70 backdrop-blur-md border border-slate-800/80 rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 md:p-4 shadow-xl flex flex-col items-end">
+              <div className="text-[10px] sm:text-xs text-slate-400 font-bold uppercase mb-0.5 sm:mb-1 flex items-center gap-1">
                 {isEnraged && <span className="text-amber-400 animate-ping">⚡</span>}
                 <span className={isEnraged ? "text-rose-400 font-black" : "text-slate-400"}>
                   {isEnraged ? "OVERCLOCKED" : "COLOSSUS HP"}
                 </span>
               </div>
-              <div className="text-3xl font-black text-red-400 font-mono tracking-tight">
+              <div className="text-2xl sm:text-3xl font-black text-red-400 font-mono tracking-tight">
                 {bossHp} / {bossMaxHp}
               </div>
-              <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-red-500/40 mt-2">
+              <div className="h-1.5 sm:h-2 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-red-500/40 mt-1.5 sm:mt-2">
                 <div
                   className={`h-full rounded-full transition-all duration-300 ${
                     isEnraged
@@ -5077,16 +5082,16 @@ export default function AthleteMindPage() {
             </div>
 
             {/* STRIKE / PARRY ALERT */}
-            <div className={`w-full bg-slate-950/70 backdrop-blur-md border rounded-2xl p-4 shadow-xl flex flex-col items-end transition-all ${
+            <div className={`w-full bg-slate-950/70 backdrop-blur-md border rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 md:p-4 shadow-xl flex flex-col items-end transition-all ${
               incomingAttack
                 ? "border-rose-500/80 shadow-[0_0_20px_rgba(244,63,94,0.5)] animate-pulse"
                 : "border-slate-800/80"
             }`}>
-              <div className="text-xs text-slate-400 font-bold uppercase mb-1">
+              <div className="text-[10px] sm:text-xs text-slate-400 font-bold uppercase mb-0.5 sm:mb-1">
                 {incomingAttack ? "PARRY ALERT" : "STRIKE IN"}
               </div>
               <div
-                className={`text-3xl font-black font-mono tracking-tight ${
+                className={`text-2xl sm:text-3xl font-black font-mono tracking-tight ${
                   incomingAttack
                     ? "text-rose-400 animate-bounce"
                     : bossAttackTimer <= 3.0
@@ -5101,7 +5106,7 @@ export default function AthleteMindPage() {
             {/* RESTART BUTTON */}
             <button
               onClick={handleRestartCampaign}
-              className="w-full bg-slate-900/80 hover:bg-red-500/20 border border-slate-700 hover:border-red-500/50 text-sm font-mono py-2.5 px-4 rounded-xl cursor-pointer text-slate-200 hover:text-white transition-all shadow-lg flex items-center justify-center gap-2"
+              className="w-full bg-slate-900/80 hover:bg-red-500/20 border border-slate-700 hover:border-red-500/50 text-xs sm:text-sm font-mono py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg sm:rounded-xl cursor-pointer text-slate-200 hover:text-white transition-all shadow-lg flex items-center justify-center gap-1.5 sm:gap-2"
               title="Restart Campaign Session"
             >
               <span>🔄</span>

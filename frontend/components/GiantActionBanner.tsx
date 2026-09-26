@@ -79,18 +79,18 @@ export const GiantActionBanner: React.FC<GiantActionBannerProps> = ({
   }
 
   return (
-    <div className="pointer-events-none absolute top-8 sm:top-10 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl text-center px-4 transition-all duration-200">
+    <div className="pointer-events-none absolute top-4 sm:top-8 md:top-10 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl text-center px-3 sm:px-4 transition-all duration-200">
       <div className={`inline-block max-w-full ${containerBg}`}>
-        {/* Massive Primary Notification Text Visible from 8+ Feet Away */}
+        {/* Massive Primary Notification Text Visible across all device viewports */}
         <h1
-          className={`text-4xl sm:text-5xl md:text-6xl font-black uppercase tracking-wider font-mono drop-shadow-[0_4px_24px_rgba(0,0,0,0.95)] leading-tight ${textClass}`}
+          className={`text-xl sm:text-3xl md:text-5xl lg:text-6xl font-black uppercase tracking-wider font-mono drop-shadow-[0_4px_24px_rgba(0,0,0,0.95)] leading-tight ${textClass}`}
         >
           {title}
         </h1>
 
         {/* Dynamic Hold Progress Bar */}
         {showProgressBar && (
-          <div className="w-72 sm:w-88 md:w-96 mx-auto mt-3 sm:mt-4 h-4 sm:h-5 bg-slate-950/90 rounded-full overflow-hidden border-2 border-amber-400/80 p-0.5 shadow-[0_0_25px_rgba(245,158,11,0.7)]">
+          <div className="w-52 sm:w-72 md:w-96 max-w-[85vw] mx-auto mt-2 sm:mt-3 md:mt-4 h-3 sm:h-4 md:h-5 bg-slate-950/90 rounded-full overflow-hidden border-2 border-amber-400/80 p-0.5 shadow-[0_0_25px_rgba(245,158,11,0.7)]">
             <div
               className="h-full rounded-full bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-400 transition-all duration-75 shadow-[0_0_15px_rgba(251,191,36,0.9)]"
               style={{ width: `${Math.min(100, Math.max(0, holdProgress * 100))}%` }}

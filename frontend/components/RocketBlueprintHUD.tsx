@@ -44,23 +44,23 @@ export const RocketBlueprintHUD: React.FC<RocketBlueprintHUDProps> = ({
 
   return (
     <div
-      className={`relative flex flex-col items-center bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 rounded-2xl p-3 shadow-[0_0_25px_rgba(0,240,255,0.15)] font-mono select-none ${className}`}
+      className={`relative flex flex-col items-center bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 rounded-xl sm:rounded-2xl p-2 sm:p-3 shadow-[0_0_25px_rgba(0,240,255,0.15)] font-mono select-none ${className}`}
     >
       {/* Top Header Bar */}
-      <div className="w-full flex items-center justify-between pb-2 border-b border-slate-800/80 mb-2">
-        <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${status.bg} ${isBreached || isShieldActive || isExploding ? "animate-ping" : ""}`} />
-          <span className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">
+      <div className="w-full flex items-center justify-between pb-1.5 sm:pb-2 border-b border-slate-800/80 mb-1 sm:mb-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${status.bg} ${isBreached || isShieldActive || isExploding ? "animate-ping" : ""}`} />
+          <span className="text-[9px] sm:text-[10px] font-black text-cyan-300 uppercase tracking-wider sm:tracking-widest">
             EXPLORER SCHEMATIC
           </span>
         </div>
-        <span className={`text-[9px] font-black tracking-wider uppercase ${status.color}`}>
+        <span className={`text-[8px] sm:text-[9px] font-black tracking-wider uppercase ${status.color}`}>
           {status.text}
         </span>
       </div>
 
       {/* Blueprint Visualizer Container */}
-      <div className="relative w-36 sm:w-40 h-64 sm:h-72 flex items-center justify-center overflow-hidden my-1">
+      <div className="relative w-28 sm:w-36 md:w-40 h-36 sm:h-52 md:h-72 flex items-center justify-center overflow-hidden my-0.5 sm:my-1">
         {/* Dynamic Kinetic Shield Forcefield Envelope */}
         {isShieldActive && !isExploding && (
           <div className="absolute inset-x-2 inset-y-1 rounded-full border-2 border-cyan-400/90 bg-cyan-500/15 shadow-[0_0_30px_rgba(0,240,255,0.85)] z-20 pointer-events-none animate-pulse flex items-center justify-center">

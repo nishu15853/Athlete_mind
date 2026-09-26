@@ -157,10 +157,10 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
       {/* ------------------------------------------------------------------- */}
       {/* 3. BOTTOM FLIGHT INSTRUMENT PANEL: RADIAL DIALS & TENSION BARS      */}
       {/* ------------------------------------------------------------------- */}
-      <div className="relative z-30 w-full bg-slate-950/95 border-t border-cyan-500/40 px-4 py-2.5 flex flex-wrap items-center justify-between gap-4 backdrop-blur-md">
+      <div className="relative z-30 w-full bg-slate-950/95 border-t border-cyan-500/40 px-2 sm:px-4 py-1.5 sm:py-2.5 grid grid-cols-3 sm:flex sm:items-center sm:justify-between gap-1.5 sm:gap-4 backdrop-blur-md">
         {/* DIAL 1: Joint Flexion & Angle Dial */}
-        <div className="flex items-center gap-3">
-          <div className="relative w-14 h-14 flex items-center justify-center">
+        <div className="flex items-center gap-1.5 sm:gap-3 justify-center sm:justify-start">
+          <div className="relative w-10 h-10 sm:w-14 sm:h-14 flex items-center justify-center flex-shrink-0">
             <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 80 80">
               {/* Outer gauge dial ring */}
               <circle
@@ -200,44 +200,44 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
             </svg>
             {/* Live Angle Number */}
             <div className="absolute flex flex-col items-center justify-center text-center">
-              <span className="text-xs font-black text-cyan-300 font-mono leading-none">
+              <span className="text-[10px] sm:text-xs font-black text-cyan-300 font-mono leading-none">
                 {Math.round(clampedAngle)}°
               </span>
             </div>
           </div>
           <div className="flex flex-col text-left">
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              JOINT FLEXION
+            <span className="text-[8px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider truncate">
+              FLEXION
             </span>
-            <span className="text-xs font-black text-cyan-300 font-mono">
-              TARGET: {Math.round(targetAngle)}°
+            <span className="text-[9px] sm:text-xs font-black text-cyan-300 font-mono">
+              {Math.round(targetAngle)}°
             </span>
           </div>
         </div>
 
         {/* GAUGE 2: Segmented LED Warp Tension / Hold Progress Bar */}
-        <div className="flex flex-col items-center flex-1 max-w-xs mx-auto">
-          <div className="w-full flex items-center justify-between text-[10px] font-bold mb-1">
-            <span className="text-slate-400 uppercase tracking-widest">
-              {repCycleStatus === "STAND_UP_TO_RECHARGE" ? "CAPACITOR RECHARGE" : "KINETIC TENSION"}
+        <div className="flex flex-col items-center flex-1 max-w-[120px] sm:max-w-xs mx-auto">
+          <div className="w-full flex items-center justify-between text-[8px] sm:text-[10px] font-bold mb-0.5 sm:mb-1">
+            <span className="text-slate-400 uppercase tracking-wider truncate">
+              {repCycleStatus === "STAND_UP_TO_RECHARGE" ? "RECHARGE" : "TENSION"}
             </span>
             <span
               className={
                 repCycleStatus === "STAND_UP_TO_RECHARGE"
-                  ? "text-amber-400 font-black animate-pulse"
+                  ? "text-amber-400 font-black animate-pulse text-[8px] sm:text-[10px]"
                   : isShieldActive
-                  ? "text-cyan-300 font-black"
-                  : "text-slate-400"
+                  ? "text-cyan-300 font-black text-[8px] sm:text-[10px]"
+                  : "text-slate-400 text-[8px] sm:text-[10px]"
               }
             >
               {repCycleStatus === "STAND_UP_TO_RECHARGE"
-                ? "STAND UP!"
+                ? "STAND"
                 : isShieldActive
-                ? "SHIELD UP"
+                ? "UP"
                 : `${Math.round(holdProgress * 100)}%`}
             </span>
           </div>
-          <div className="w-full flex gap-1 h-3 bg-slate-900 rounded p-0.5 border border-slate-800">
+          <div className="w-full flex gap-0.5 sm:gap-1 h-2 sm:h-3 bg-slate-900 rounded p-0.5 border border-slate-800">
             {[...Array(10)].map((_, i) => {
               const active = isShieldActive || holdProgress >= (i + 1) * 0.1;
               return (
@@ -259,8 +259,8 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
         </div>
 
         {/* DIAL 3: Form Purity Tachometer */}
-        <div className="flex items-center gap-3">
-          <div className="relative w-14 h-14 flex items-center justify-center">
+        <div className="flex items-center gap-1.5 sm:gap-3 justify-center sm:justify-end">
+          <div className="relative w-10 h-10 sm:w-14 sm:h-14 flex items-center justify-center flex-shrink-0">
             <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 80 80">
               <circle
                 cx="40"
@@ -285,16 +285,16 @@ export const FuturisticCockpitFrame: React.FC<FuturisticCockpitFrameProps> = ({
               />
             </svg>
             <div className="absolute flex flex-col items-center justify-center text-center">
-              <span className="text-xs font-black text-emerald-400 font-mono leading-none">
+              <span className="text-[10px] sm:text-xs font-black text-emerald-400 font-mono leading-none">
                 {purityPct}%
               </span>
             </div>
           </div>
           <div className="flex flex-col text-left">
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              FORM PURITY
+            <span className="text-[8px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider truncate">
+              PURITY
             </span>
-            <span className="text-xs font-black text-emerald-300 font-mono">
+            <span className="text-[9px] sm:text-xs font-black text-emerald-300 font-mono">
               {purityPct >= 80 ? "OPTIMAL" : purityPct >= 60 ? "STABLE" : "FAULT"}
             </span>
           </div>
