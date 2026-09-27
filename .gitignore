@@ -17,3 +17,6 @@ out/
 build/
 *.tsbuildinfo
 .DS_Store
+
+# Local Netlify folder
+.netlify
